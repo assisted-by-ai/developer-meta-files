@@ -1,0 +1,901 @@
+#!/bin/bash
+
+## Copyright (C) 2026 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+## AI-Assisted
+
+## Apply project-wide GitHub security/policy settings to the source
+## organizations (Kicksecure, Whonix). Idempotent and apply-only.
+## Run `dm-github-policy --help` for the full settings list and
+## reasoning.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+
+if ! command -v github-org-fork >/dev/null 2>&1; then
+   printf 'error: github-org-fork not found on PATH (developer-meta-files install incomplete).\n' >&2
+   exit 1
+fi
+# shellcheck source=/usr/libexec/developer-meta-files/github-org-lib.bsh
+source /usr/libexec/developer-meta-files/github-org-lib.bsh
+
+## Production list (commented out while testing on org-ai-assisted):
+# readonly ORGS=( 'Kicksecure' 'Whonix' )
+readonly ORGS=( 'org-ai-assisted' )
+readonly POLICY_JOBS=4
+readonly RULESET_NAME_BRANCH='dm-github-policy default-branch protection'
+readonly RULESET_NAME_TAG='dm-github-policy tag protection'
+readonly CODE_SEC_CONFIG_NAME='dm-github-policy code security'
+
+dry_run=0
+verbose=0
+mode='apply'   ## apply | audit
+
+show_help() {
+   cat <<'EOF'
+Apply project-wide GitHub security/policy settings to the source
+organizations (Kicksecure, Whonix). Idempotent and apply-only - never
+disables a setting that was already on. Org-wide settings are
+preferred over per-repo where possible: enabling a security feature
+"for all existing repos" via a single org-level call beats iterating
+every repo, both for atomicity and for new-repo coverage.
+
+Usage:
+  dm-github-policy             ## apply policy to Kicksecure + Whonix
+  dm-github-policy --dry-run   ## report planned changes only
+  dm-github-policy --audit     ## read-only inspection of current state
+                               ## (current settings, members lacking
+                               ## 2FA, existing rulesets); no writes
+  dm-github-policy --help
+
+Settings applied at the org level:
+  - Fork-PR contributor approval = all_external_contributors
+  - Default workflow GITHUB_TOKEN permissions = read; cannot
+    create or approve pull requests
+  - Allowed Actions = github-owned + Marketplace-verified-creators
+    only
+  - Members policy:
+    * Default repository permission for new members = read
+    * Members cannot create repositories (owners only)
+  - 2FA enforcement (UI-only). The two_factor_requirement_enabled
+    field is read-only on PATCH /orgs/{org}; toggle in the UI under
+    Settings -> Authentication security.
+    CAUTION: enabling removes members who do not have 2FA on. Run
+    --audit first to see the list of members lacking 2FA.
+  - Code security via the modern Code Security Configurations
+    API: a single org-level configuration enables secret scanning,
+    push protection, Dependabot alerts and security updates, and
+    dependency graph. Attached to all existing repos (scope=all)
+    and set as the default for newly created repos. CodeQL default
+    setup and private vulnerability reporting are explicitly
+    disabled in the configuration.
+  - Repository ruleset on the default branch of all repos:
+    block force-push, block deletion, require signed commits.
+    bypass_actors=[] - no one, including org owners, can override.
+    Deliberately does NOT include the pull_request rule (would
+    require all merges to go through a PR; maintainers push
+    directly to master), required_status_checks (per-repo CI
+    coupling), or required_linear_history.
+  - Repository ruleset on tags of all repos: block deletion,
+    block re-pointing, require signed tags. Same bypass_actors=[].
+  - PAT and App policy toggles: SKIPPED (UI-only; --audit reports
+    state). Apply path prints UI links for manual configuration.
+
+Settings applied per-repo (no org-wide endpoint):
+  - has_wiki = false
+  - has_issues = true
+
+Deliberately NOT applied (with reasoning):
+  - Private vulnerability reporting: project channel for disclosure
+    is OpenPGP email; enabling GitHub's would split the inbox.
+  - CodeQL default setup: brittle auto-detection; a committed
+    .github/workflows/codeql.yml is more reliable. Belongs in a
+    separate workflow-files-deploy tool.
+  - Required PR reviews / status checks / linear history /
+    web-commit-signoff / disable-forking: each has a real cost
+    that does not justify uniform application.
+  - Allowed Actions tightening can break existing workflows pinned
+    to unverified third-party actions. Run --audit first to spot
+    anything you'd need to update.
+
+Note on signed commits + UI merging:
+  GitHub's "Merge pull request" and "Squash and merge" buttons sign
+  the produced commit with the web-flow GPG key, so they keep
+  working. "Rebase and merge" does NOT re-sign rebased commits, so
+  it will fail when a contributor's PR commits are unsigned.
+  Prefer Merge or Squash for fork PRs.
+
+Auth:
+  $GITHUB_TOKEN env var, or chmod-600 ~/.config/github-token.
+  Classic PAT needs admin:org + repo. Fine-grained PAT needs
+  Administration r/w + Code security r/w + Webhooks r/w +
+  Members r/w (the last for 2FA enforcement).
+
+OSSF Scorecard mapping:
+  Branch-Protection: Tier 1 (3/10) - deliberate ceiling. Higher
+    tiers require switching from maintainer-direct-push to
+    PR-required-for-merge, which conflicts with our model.
+  Token-Permissions: covered (default workflow GITHUB_TOKEN=read,
+    no PR approval).
+  Webhooks (Critical): audit lists org-level webhooks lacking a
+    secret. Per-repo webhooks not yet audited.
+  Dangerous-Workflow (Critical): partially mitigated by
+    Allowed-Actions=verified-only. Detection is per-workflow
+    content; avoid pull_request_target with explicit PR checkout
+    and avoid using untrusted github.event.* fields directly in
+    inline scripts. Reference:
+    https://securitylab.github.com/research/github-actions-preventing-pwn-requests/
+  Code-Review (High): deliberately skipped. Maintainer-direct-push
+    workflow.
+  Vulnerabilities (High): covered indirectly via Dependabot alerts
+    enabled by the code-security configuration.
+  Dependency-Update-Tool (High): coverage requires a committed
+    .github/dependabot.yml per repo (Scorecard checks file
+    presence). Audit lists missing repos as a worklist.
+  Signed-Releases (High): tag ruleset enforces signed tags;
+    per-release artifact signing is build-time per repo.
+  SAST / CodeQL (Medium): deliberately skipped at the API level
+    (default-setup is brittle). A committed
+    .github/workflows/codeql.yml is the better path; outside this
+    tool's scope.
+  Maintained (High): organic activity metric; not addressable by
+    policy.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+   case "$1" in
+      --dry-run) dry_run=1; shift ;;
+      --audit)   mode='audit'; shift ;;
+      -v|--verbose) verbose=1; shift ;;
+      -h|--help)
+         show_help
+         exit 0
+         ;;
+      *)
+         printf 'unknown argument: %s\n' "$(ghorg_safe_print 64 "$1")" >&2
+         exit 64
+         ;;
+   esac
+done
+
+ghorg_require_deps
+
+## Per-run counter accumulator. main() creates a tempfile and exports
+## its path; api_call and record_skip append a one-word status (ok |
+## warn | dry | skip) per event. main() then sums by `wc -l` at the
+## end. A tempfile (not in-memory variables) is required because the
+## per-repo apply loop backgrounds children with `&`; bash variable
+## updates in those subshells would be lost on join. Short appends
+## from concurrent processes are atomic up to PIPE_BUF (4096 bytes on
+## Linux) - our writes are 4-5 bytes.
+api_counter_file=''
+
+api_record() {
+   [ -n "$api_counter_file" ] || return 0
+   printf '%s\n' "$1" >> "$api_counter_file"
+}
+
+## Records a SKIP event. Used by apply_org_policy for settings that
+## have no REST API (PAT, App, OAuth policies) and must be flipped in
+## the UI.
+record_skip() {
+   api_record skip
+}
+
+## Wrapper that prints a one-line summary per HTTP call. On non-2xx
+## the body is logged via sanitize-string and the call returns
+## non-zero, but the caller decides whether to abort or continue.
+##
+## Success lines are printed unconditionally (not gated on -v) so the
+## operator sees positive evidence that each setting was applied; the
+## end-of-run summary then shows the totals.
+api_call() {
+   local label="$1" method="$2" path="$3" body="${4:-}"
+   if [ "$dry_run" = '1' ]; then
+      printf 'DRY-RUN: %s -> %s %s\n' "$label" "$method" "$path"
+      api_record dry
+      return 0
+   fi
+   local result status
+   result="$(ghorg_api "$method" "$path" "$body")" || {
+      api_record warn
+      return 1
+   }
+   status="$(ghorg_status_of "$result")"
+   case "$status" in
+      200|201|204)
+         printf 'ok:   %s [%s]\n' "$label" "$status"
+         api_record ok
+         return 0
+         ;;
+      *)
+         printf 'warn: %s [%s]\n%s\n' "$label" "$status" \
+            "$(ghorg_safe_print 512 "$(ghorg_body_of "$result")")" >&2
+         api_record warn
+         return 1
+         ;;
+   esac
+}
+
+## Idempotent ruleset upsert. GitHub's POST /orgs/{org}/rulesets
+## creates a new ruleset every time, which would yield duplicates on
+## re-run; use GET to find an existing ruleset by name and PUT to
+## update, falling back to POST when none exists.
+##
+## Args: $1 = org, $2 = ruleset name (used for the GET-by-name match),
+## $3 = JSON body (must include the same name).
+upsert_org_ruleset() {
+   local org="$1" name="$2" body="$3"
+   if [ "$dry_run" = '1' ]; then
+      printf 'DRY-RUN: %s: upsert ruleset %s\n' "$org" "$name"
+      return 0
+   fi
+
+   local result status existing_id
+   result="$(ghorg_api GET "/orgs/${org}/rulesets")" || return 1
+   status="$(ghorg_status_of "$result")"
+   if [ "$status" != '200' ]; then
+      printf 'warn: %s: list rulesets returned %s\n' "$org" "$status" >&2
+      return 1
+   fi
+   existing_id="$(ghorg_body_of "$result" \
+      | jq -r --arg name "$name" \
+        '.[] | select(.name == $name) | .id' \
+      | head --lines=1)"
+
+   if [ -n "$existing_id" ] && [ "$existing_id" != "null" ]; then
+      ## Validate id is numeric before placing it into a URL path.
+      if ! [[ "$existing_id" =~ ^[0-9]+$ ]]; then
+         printf 'warn: %s: ruleset id %s not numeric; refusing\n' \
+            "$org" "$(ghorg_safe_print 32 "$existing_id")" >&2
+         return 1
+      fi
+      api_call "${org}: update ruleset id=${existing_id} (${name})" \
+         PUT "/orgs/${org}/rulesets/${existing_id}" "$body"
+   else
+      api_call "${org}: create ruleset (${name})" \
+         POST "/orgs/${org}/rulesets" "$body"
+   fi
+}
+
+## Idempotent code-security-configuration upsert + attach + default.
+## Replaces the deprecated PATCH /orgs/{org} security-defaults fields
+## and /orgs/{org}/{product}/enable_all endpoints with the modern
+## /orgs/{org}/code-security/configurations API. Three steps per org:
+##   1. find-or-create the configuration named CODE_SEC_CONFIG_NAME
+##   2. attach it to all existing repos (scope=all)
+##   3. set it as the default for new repos (default_for_new_repos=all)
+##
+## Configuration body: enables secret scanning + push protection,
+## Dependabot alerts + security updates, dependency graph. Disables
+## CodeQL default setup (brittle on monorepos - prefer a committed
+## .github/workflows/codeql.yml) and private vulnerability reporting
+## (project disclosure channel is OpenPGP email; see header notes).
+apply_code_security_config() {
+   local org="$1"
+
+   local config_body
+   config_body="$(jq -n --arg name "$CODE_SEC_CONFIG_NAME" '{
+      name: $name,
+      description: "Project-wide code security applied via dm-github-policy.",
+      enforcement: "enforced",
+      secret_scanning: "enabled",
+      secret_scanning_push_protection: "enabled",
+      dependabot_alerts: "enabled",
+      dependabot_security_updates: "enabled",
+      dependency_graph: "enabled",
+      code_scanning_default_setup: "disabled",
+      private_vulnerability_reporting: "disabled"
+   }')"
+
+   if [ "$dry_run" = '1' ]; then
+      printf 'DRY-RUN: %s: upsert code-security configuration %s\n' \
+         "$org" "$CODE_SEC_CONFIG_NAME"
+      printf 'DRY-RUN: %s: attach code-security configuration scope=all\n' "$org"
+      printf 'DRY-RUN: %s: set code-security configuration default_for_new_repos=all\n' "$org"
+      api_record dry; api_record dry; api_record dry
+      return 0
+   fi
+
+   ## Find existing configuration by name.
+   local list_result list_status existing_id
+   list_result="$(ghorg_api GET "/orgs/${org}/code-security/configurations")" \
+      || { api_record warn; return 1; }
+   list_status="$(ghorg_status_of "$list_result")"
+   if [ "$list_status" != '200' ]; then
+      printf 'warn: %s: list code-security configurations [%s]\n%s\n' \
+         "$org" "$list_status" \
+         "$(ghorg_safe_print 512 "$(ghorg_body_of "$list_result")")" >&2
+      api_record warn
+      return 1
+   fi
+   existing_id="$(ghorg_body_of "$list_result" \
+      | jq -r --arg name "$CODE_SEC_CONFIG_NAME" \
+        '.[] | select(.name == $name) | .id' \
+      | head --lines=1)"
+
+   if [ -n "$existing_id" ] && [ "$existing_id" != 'null' ]; then
+      if ! [[ "$existing_id" =~ ^[0-9]+$ ]]; then
+         printf 'warn: %s: code-security config id %s not numeric; refusing\n' \
+            "$org" "$(ghorg_safe_print 32 "$existing_id")" >&2
+         api_record warn
+         return 1
+      fi
+      api_call "${org}: update code-security configuration id=${existing_id}" \
+         PATCH "/orgs/${org}/code-security/configurations/${existing_id}" \
+         "$config_body" || true
+   else
+      ## POST returns the new config object including its id; we need
+      ## the id for the attach + default calls.
+      local create_result create_status
+      create_result="$(ghorg_api POST "/orgs/${org}/code-security/configurations" "$config_body")" \
+         || { api_record warn; return 1; }
+      create_status="$(ghorg_status_of "$create_result")"
+      case "$create_status" in
+         200|201)
+            existing_id="$(ghorg_body_of "$create_result" | jq -r '.id')"
+            printf 'ok:   %s: created code-security configuration id=%s [%s]\n' \
+               "$org" "$existing_id" "$create_status"
+            api_record ok
+            ;;
+         *)
+            printf 'warn: %s: create code-security configuration [%s]\n%s\n' \
+               "$org" "$create_status" \
+               "$(ghorg_safe_print 512 "$(ghorg_body_of "$create_result")")" >&2
+            api_record warn
+            return 1
+            ;;
+      esac
+   fi
+
+   ## Attach to all existing repos in the org. scope=all covers every
+   ## repo without listing them; the configuration's enforcement field
+   ## takes care of the on/off state.
+   local attach_body
+   attach_body="$(jq -n '{scope: "all"}')"
+   api_call "${org}: attach code-security config to all repos" \
+      POST "/orgs/${org}/code-security/configurations/${existing_id}/attach" \
+      "$attach_body" || true
+
+   ## Make this configuration the default for newly created repos.
+   local default_body
+   default_body="$(jq -n '{default_for_new_repos: "all"}')"
+   api_call "${org}: set code-security config as default for new repos" \
+      PUT "/orgs/${org}/code-security/configurations/${existing_id}/defaults" \
+      "$default_body" || true
+}
+
+## Org-level settings: fork-PR approval, workflow permissions, allowed
+## actions, 2FA SKIP, member policy, code-security configuration,
+## branch and tag rulesets, PAT and App SKIPs.
+apply_org_policy() {
+   local org="$1"
+   printf '\n=== org policy: %s ===\n' "$org"
+
+   local body
+
+   ## 1. Fork-PR contributor approval = all_external_contributors.
+   body="$(jq -n '{approval_policy: "all_external_contributors"}')"
+   api_call "${org}: fork-PR approval=all_external_contributors" \
+      PUT "/orgs/${org}/actions/permissions/fork-pr-contributor-approval" "$body" \
+      || true
+
+   ## 2. Default workflow GITHUB_TOKEN permissions = read; cannot
+   ##    approve PRs. Covers the "default workflow permissions" and
+   ##    "Allow Actions to create and approve pull requests" toggles
+   ##    in the org Actions settings UI.
+   body="$(jq -n '{
+      default_workflow_permissions: "read",
+      can_approve_pull_request_reviews: false
+   }')"
+   api_call "${org}: workflow GITHUB_TOKEN read-only, no PR approval" \
+      PUT "/orgs/${org}/actions/permissions/workflow" "$body" \
+      || true
+
+   ## 3. Allowed Actions = selected (github-owned + verified creators).
+   ##    Two-step: first turn the org-level Actions permission to
+   ##    "selected" (gating which actions can be invoked), then set the
+   ##    selected-actions list to allow github-owned and verified.
+   ##    CAUTION: a workflow that pins to an unverified third-party
+   ##    action will start failing after this. Audit before applying
+   ##    if you have not already; --dry-run shows what would change.
+   body="$(jq -n '{
+      enabled_repositories: "all",
+      allowed_actions: "selected"
+   }')"
+   api_call "${org}: actions enabled=all, allowed=selected" \
+      PUT "/orgs/${org}/actions/permissions" "$body" \
+      || true
+   body="$(jq -n '{
+      github_owned_allowed: true,
+      verified_allowed: true,
+      patterns_allowed: []
+   }')"
+   api_call "${org}: selected-actions = github-owned + verified-creators" \
+      PUT "/orgs/${org}/actions/permissions/selected-actions" "$body" \
+      || true
+
+   ## 4. Member-side org policy: default repo permission pinned to
+   ##    "read", repository creation restricted to admins. Bundled
+   ##    into one PATCH /orgs/{org} body.
+   ##
+   ##    Verified against the OpenAPI spec
+   ##    (github/rest-api-description) at edit time:
+   ##      - default_repository_permission: present
+   ##      - members_can_create_repositories: present
+   ##      - members_can_create_public_repositories: present
+   ##      - members_can_create_private_repositories: present
+   ##      - members_can_create_internal_repositories: present
+   ##    Removed (not in spec or deprecated):
+   ##      - members_allowed_repository_creation_type (DEPRECATED;
+   ##        replaced by the granular members_can_create_*_repositories
+   ##        booleans).
+   ##      - members_can_delete_repositories (NOT in PATCH /orgs/{org}
+   ##        schema; would be silently ignored. Restricting repo
+   ##        deletion is UI-only as of verification).
+   ##      - two_factor_requirement_enabled (READ-only field on the
+   ##        GET /orgs/{org} response; not settable via PATCH. 2FA
+   ##        enforcement is UI-only - see step 4b below).
+   body="$(jq -n '{
+      default_repository_permission: "read",
+      members_can_create_repositories: false,
+      members_can_create_public_repositories: false,
+      members_can_create_private_repositories: false,
+      members_can_create_internal_repositories: false
+   }')"
+   api_call "${org}: members policy (default-perm=read, no member create)" \
+      PATCH "/orgs/${org}" "$body" \
+      || true
+
+   ## 4b. 2FA enforcement (UI-only).
+   ##     two_factor_requirement_enabled is a READ-only field on GET
+   ##     /orgs/{org}; the OpenAPI spec exposes no PATCH/PUT setter
+   ##     for it. Print a SKIP with the UI URL so the operator knows
+   ##     to flip it manually.
+   ##     CAUTION: enabling 2FA in the UI on an org with members who
+   ##     do not have 2FA turned on will REMOVE those members. The
+   ##     --audit mode lists members lacking 2FA so the operator can
+   ##     confirm membership state before flipping the switch.
+   printf 'skip: %s: 2FA enforcement must be set via UI - see\n' "$org"
+   printf '       https://github.com/organizations/%s/settings/security\n' "$org"
+   record_skip
+
+   ## 5+6. Code security via the modern Code Security Configurations
+   ##      API (replaces the now-deprecated PATCH /orgs/{org} security
+   ##      defaults fields and the /orgs/{org}/{product}/enable_all
+   ##      family). Three calls per org:
+   ##        a) upsert a configuration named CODE_SEC_CONFIG_NAME with
+   ##           the desired feature toggles (idempotent: if a same-name
+   ##           config exists, PATCH it; else POST).
+   ##        b) attach the configuration to ALL existing repos
+   ##           (scope=all). One call regardless of repo count.
+   ##        c) set the configuration as the default for newly created
+   ##           repos (default_for_new_repos=all).
+   ##
+   ##      Deliberately disabled in the configuration: code_scanning_default_setup
+   ##      (CodeQL default setup is brittle - see header) and
+   ##      private_vulnerability_reporting (project channel is OpenPGP
+   ##      email - see header).
+   apply_code_security_config "$org" || true
+
+   ## 7. Org ruleset on the default branch of every repo: block force
+   ##    pushes (non_fast_forward), block deletion, require signed
+   ##    commits. ~DEFAULT_BRANCH applies to whichever branch each repo
+   ##    has set as default; ~ALL covers every repo in the org.
+   ##
+   ##    bypass_actors is set to the empty list explicitly. Without an
+   ##    actor in this list NO ONE - including org owners and repo
+   ##    admins - can override the rules. This is stricter than the
+   ##    legacy per-repo branch protection, where enforce_admins=false
+   ##    would let admins force-push past the rule. Rulesets and
+   ##    legacy branch protections layer additively (most restrictive
+   ##    wins), so this also closes the bypass on any leftover legacy
+   ##    branch protection rules from earlier runs.
+   ##
+   ##    DELIBERATELY OMITTED rule types:
+   ##      - pull_request (would require all merges into the default
+   ##        branch to go through a PR). Maintainers push directly to
+   ##        master from the terminal; enabling this would cause the
+   ##        "Bypassed rule violations: Changes must be made through a
+   ##        pull request" warning on every legitimate push.
+   ##      - required_status_checks (each repo would need a CI defined
+   ##        and named here; not feasible to apply uniformly).
+   ##      - required_linear_history (opinionated; can break some
+   ##        merge workflows).
+   local branch_ruleset
+   branch_ruleset="$(jq -n --arg name "$RULESET_NAME_BRANCH" '{
+      name: $name,
+      target: "branch",
+      enforcement: "active",
+      bypass_actors: [],
+      conditions: {
+         ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] },
+         repository_name: { include: ["~ALL"], exclude: [] }
+      },
+      rules: [
+         { type: "deletion" },
+         { type: "non_fast_forward" },
+         { type: "required_signatures" }
+      ]
+   }')"
+   upsert_org_ruleset "$org" "$RULESET_NAME_BRANCH" "$branch_ruleset" || true
+
+   ## 8. Org ruleset for tags: block tag deletion, block tag
+   ##    re-pointing (non_fast_forward), require signed tags. Critical
+   ##    for release integrity - without this, anyone with push rights
+   ##    could move a release tag like v1.0 to point at a different
+   ##    commit. Same bypass_actors=[] enforcement: nobody, including
+   ##    owners, can override.
+   local tag_ruleset
+   tag_ruleset="$(jq -n --arg name "$RULESET_NAME_TAG" '{
+      name: $name,
+      target: "tag",
+      enforcement: "active",
+      bypass_actors: [],
+      conditions: {
+         ref_name: { include: ["~ALL"], exclude: [] },
+         repository_name: { include: ["~ALL"], exclude: [] }
+      },
+      rules: [
+         { type: "deletion" },
+         { type: "non_fast_forward" },
+         { type: "required_signatures" }
+      ]
+   }')"
+   upsert_org_ruleset "$org" "$RULESET_NAME_TAG" "$tag_ruleset" || true
+
+   ## 9. Personal access token policies (audit-only path).
+   ##    The org-level toggles "Allow access via fine-grained PATs",
+   ##    "Require approval for fine-grained PATs", "Allow classic PATs",
+   ##    "Restrict access by classic PATs" are configurable in the org
+   ##    Settings UI under Personal access tokens. As of research, the
+   ##    public REST API exposes GETs for pending requests and approved
+   ##    PATs but does NOT expose stable setters for the policy
+   ##    toggles. The apply path is therefore commented out below; the
+   ##    audit path (--audit) lists pending requests and approved PATs
+   ##    so the operator can see what is in flight before flipping the
+   ##    toggles in the UI.
+   ##
+   ## TODO: replace with real API calls when GitHub publishes stable
+   ## REST endpoints for the PAT policy toggles. Reference:
+   ## https://github.com/orgs/${org}/settings/personal-access-tokens
+   printf 'skip: %s: PAT policy toggles must be set via UI - see\n' "$org"
+   printf '       https://github.com/organizations/%s/settings/personal-access-tokens\n' "$org"
+   record_skip
+   ## Sample of what would be set if a stable REST surface existed:
+   # body="$(jq -n '{
+   #    personal_access_token_classic_allowed: false,
+   #    personal_access_token_fine_grained_approval_required: true
+   # }')"
+   # api_call "${org}: PAT policy (block classic, require approval)" \
+   #    PATCH "/orgs/${org}" "$body" || true
+
+   ## 10. GitHub App / OAuth App installation policies (audit-only).
+   ##    "Restrict App installation to org owners", "Restrict OAuth
+   ##    third-party access", "Require approval for new App installs"
+   ##    are UI-only. REST exposes GETs for installed Apps but no
+   ##    setters. The audit path lists installed Apps; the apply path
+   ##    skips with a UI pointer.
+   ##
+   ## TODO: replace with real API calls when GitHub publishes stable
+   ## REST endpoints. Reference:
+   ## https://github.com/organizations/${org}/settings/oauth_application_policy
+   ## https://github.com/organizations/${org}/settings/installations
+   printf 'skip: %s: GitHub App / OAuth App policies must be set via UI - see\n' "$org"
+   printf '       https://github.com/organizations/%s/settings/installations\n' "$org"
+   printf '       https://github.com/organizations/%s/settings/oauth_application_policy\n' "$org"
+   record_skip
+   ## Sample of what would be set if a stable REST surface existed:
+   # body="$(jq -n '{
+   #    members_can_install_github_apps: false,
+   #    oauth_app_access_restrictions_enabled: true
+   # }')"
+   # api_call "${org}: App install/OAuth restrictions" \
+   #    PATCH "/orgs/${org}" "$body" || true
+}
+
+## One-line GET-and-print helper for audit_org_state. Args:
+##   $1 = label, $2 = API path, $3 = jq filter (default '.').
+audit_get() {
+   local label="$1" path="$2" jq_filter="${3:-.}"
+   local result status body
+   result="$(ghorg_api GET "$path")" || {
+      printf '  %s: <api error>\n' "$label"
+      return 0
+   }
+   status="$(ghorg_status_of "$result")"
+   if [ "$status" != '200' ]; then
+      printf '  %s: HTTP %s\n' "$label" "$status"
+      return 0
+   fi
+   body="$(ghorg_body_of "$result")"
+   ## sanitize-string reads stdin natively, so the pipe is the
+   ## sanitization step; ghorg_safe_print is for arg-form callers.
+   printf '  %s: %s\n' "$label" "$(printf '%s' "$body" \
+      | jq -r "$jq_filter" 2>/dev/null \
+      | tr '\n' ' ' \
+      | sanitize-string 200)"
+}
+
+## Read-only inspection of an org's current security/policy state.
+## Does no PATCH/PUT/POST. Designed to be run before --apply so the
+## operator can spot the two changes most likely to surprise them:
+## an Allowed-Actions tightening that breaks workflows pinned to
+## unverified third-party actions, and a 2FA enforcement that removes
+## members without 2FA.
+audit_org_state() {
+   local org="$1"
+   printf '\n=== audit: %s ===\n' "$org"
+
+   audit_get 'fork-PR approval policy' \
+      "/orgs/${org}/actions/permissions/fork-pr-contributor-approval" \
+      '.approval_policy // "(unset)"'
+
+   audit_get 'workflow GITHUB_TOKEN permissions' \
+      "/orgs/${org}/actions/permissions/workflow" \
+      '"default=" + (.default_workflow_permissions // "?") + ", can_approve_PRs=" + ((.can_approve_pull_request_reviews // false) | tostring)'
+
+   audit_get 'actions allowed_actions' \
+      "/orgs/${org}/actions/permissions" \
+      '"enabled_repos=" + (.enabled_repositories // "?") + ", allowed_actions=" + (.allowed_actions // "?")'
+
+   audit_get 'selected-actions allow-list' \
+      "/orgs/${org}/actions/permissions/selected-actions" \
+      '"github_owned=" + ((.github_owned_allowed // false) | tostring) + ", verified=" + ((.verified_allowed // false) | tostring) + ", patterns=" + ((.patterns_allowed // []) | length | tostring)'
+
+   audit_get '2FA required for org members' \
+      "/orgs/${org}" \
+      '.two_factor_requirement_enabled // false'
+
+   audit_get 'code-security defaults for new repos' \
+      "/orgs/${org}" \
+      '"secret=" + ((.secret_scanning_enabled_for_new_repositories // false) | tostring) + ", push_prot=" + ((.secret_scanning_push_protection_enabled_for_new_repositories // false) | tostring) + ", dep_alerts=" + ((.dependabot_alerts_enabled_for_new_repositories // false) | tostring) + ", dep_updates=" + ((.dependabot_security_updates_enabled_for_new_repositories // false) | tostring) + ", dep_graph=" + ((.dependency_graph_enabled_for_new_repositories // false) | tostring)'
+
+   ## Members without 2FA - the list that would be removed if 2FA
+   ## enforcement were enabled. Paginate; stop after a sensible cap to
+   ## avoid runaway output if the org has many such members.
+   printf '  members lacking 2FA (would be removed by enforcement):\n'
+   local result status body count names
+   result="$(ghorg_api GET "/orgs/${org}/members?filter=2fa_disabled&per_page=100")" || true
+   status="$(ghorg_status_of "$result")"
+   if [ "$status" = '200' ]; then
+      body="$(ghorg_body_of "$result")"
+      count="$(printf '%s' "$body" | jq 'length')"
+      if [ "$count" = '0' ]; then
+         printf '    (none)\n'
+      else
+         names="$(printf '%s' "$body" | jq -r '.[].login')"
+         while IFS= read -r u; do
+            [ -z "$u" ] && continue
+            printf '    - %s\n' "$(ghorg_safe_print 64 "$u")"
+         done <<< "$names"
+      fi
+   else
+      printf '    HTTP %s (need admin:org / Members read scope)\n' "$status"
+   fi
+
+   ## Existing rulesets matching the names we'd upsert (branch + tag).
+   result="$(ghorg_api GET "/orgs/${org}/rulesets")" || true
+   status="$(ghorg_status_of "$result")"
+   if [ "$status" = '200' ]; then
+      local ruleset_body name ids
+      ruleset_body="$(ghorg_body_of "$result")"
+      for name in "$RULESET_NAME_BRANCH" "$RULESET_NAME_TAG"; do
+         printf '  existing rulesets named "%s":\n' "$name"
+         ids="$(printf '%s' "$ruleset_body" \
+            | jq -r --arg name "$name" \
+              '.[] | select(.name == $name) | .id' || true)"
+         if [ -z "$ids" ]; then
+            printf '    (none; --apply would create one)\n'
+         else
+            while IFS= read -r id; do
+               [ -z "$id" ] && continue
+               printf '    - id=%s\n' "$(ghorg_safe_print 32 "$id")"
+            done <<< "$ids"
+         fi
+      done
+   else
+      printf '  rulesets list: HTTP %s\n' "$status"
+   fi
+
+   ## Personal access tokens: count pending requests + count approved
+   ## fine-grained PATs accessing the org. Both indicate the
+   ## fine-grained PAT system is in active use, which is informative
+   ## context for the operator deciding whether to flip the UI policy
+   ## toggles (the toggles are not REST-settable - see apply_org_policy).
+   printf '  fine-grained PAT activity:\n'
+   result="$(ghorg_api GET "/orgs/${org}/personal-access-token-requests?per_page=1")" || true
+   status="$(ghorg_status_of "$result")"
+   case "$status" in
+      200)
+         ## Count via the JSON length on this page; use a HEAD-style
+         ## follow-up if exact totals matter (skipped for simplicity).
+         local pending
+         pending="$(ghorg_body_of "$result" | jq 'length' 2>/dev/null || printf '?')"
+         printf '    pending requests on first page: %s\n' "$pending"
+         ;;
+      404|403)
+         printf '    requests endpoint: HTTP %s (approval flow may be off / token lacks scope)\n' "$status"
+         ;;
+      *) printf '    requests endpoint: HTTP %s\n' "$status" ;;
+   esac
+   result="$(ghorg_api GET "/orgs/${org}/personal-access-tokens?per_page=1")" || true
+   status="$(ghorg_status_of "$result")"
+   case "$status" in
+      200)
+         local approved
+         approved="$(ghorg_body_of "$result" | jq 'length' 2>/dev/null || printf '?')"
+         printf '    approved tokens on first page: %s\n' "$approved"
+         ;;
+      *) printf '    approved tokens endpoint: HTTP %s\n' "$status" ;;
+   esac
+
+   ## Installed GitHub Apps. List names so operator can verify the set
+   ## is the intended one before deciding whether to lock down installs.
+   printf '  installed GitHub Apps:\n'
+   result="$(ghorg_api GET "/orgs/${org}/installations?per_page=100")" || true
+   status="$(ghorg_status_of "$result")"
+   if [ "$status" = '200' ]; then
+      local installs
+      installs="$(ghorg_body_of "$result" \
+         | jq -r '.installations[]? | "    - " + (.app_slug // "?") + " (id=" + ((.id // 0) | tostring) + ")"' \
+         2>/dev/null || true)"
+      if [ -z "$installs" ]; then
+         printf '    (none)\n'
+      else
+         while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            printf '%s\n' "$line"
+         done <<< "$installs"
+      fi
+   else
+      printf '    HTTP %s\n' "$status"
+   fi
+
+   ## Org webhooks: any without a configured `secret` are a Critical
+   ## risk per the OSSF Scorecard "Webhooks" check. The GitHub API
+   ## never returns the secret value itself; presence is reflected as
+   ## a non-empty placeholder in `.config.secret`. Absent or empty
+   ## means no secret configured - the webhook accepts unauthenticated
+   ## payloads.
+   printf '  org webhooks (Scorecard "Webhooks" check):\n'
+   result="$(ghorg_api GET "/orgs/${org}/hooks?per_page=100")" || true
+   status="$(ghorg_status_of "$result")"
+   if [ "$status" = '200' ]; then
+      local total no_secret
+      total="$(ghorg_body_of "$result" | jq 'length' 2>/dev/null || printf '?')"
+      no_secret="$(ghorg_body_of "$result" \
+         | jq '[.[] | select(.config.secret == null or .config.secret == "")] | length' \
+         2>/dev/null || printf '?')"
+      if [ "$total" = '0' ]; then
+         printf '    (none configured)\n'
+      else
+         printf '    total=%s, lacking secret=%s\n' "$total" "$no_secret"
+      fi
+   else
+      printf '    HTTP %s (token may lack admin:org_hook scope)\n' "$status"
+   fi
+
+   ## Dependabot config-file presence: the OSSF Scorecard
+   ## "Dependency-Update-Tool" check looks for .github/dependabot.yml
+   ## file presence specifically, so even though our org-level code-
+   ## security config enables Dependabot alerts, repos missing the
+   ## file still fail Scorecard. This audit counts repos with vs
+   ## without and lists the missing ones as a worklist.
+   printf '  dependabot.yml presence (Scorecard "Dependency-Update-Tool"):\n'
+   local repos missing_count have_count missing_list
+   repos="$(ghorg_list_repos "$org" 0 0 0 | sort --unique)"
+   if [ -z "$repos" ]; then
+      printf '    (no public non-archived non-fork repos)\n'
+   else
+      missing_count=0
+      have_count=0
+      missing_list=''
+      while IFS= read -r repo; do
+         [ -z "$repo" ] && continue
+         result="$(ghorg_api GET "/repos/${org}/${repo}/contents/.github/dependabot.yml")" || true
+         status="$(ghorg_status_of "$result")"
+         if [ "$status" = '200' ]; then
+            have_count=$(( have_count + 1 ))
+         else
+            missing_count=$(( missing_count + 1 ))
+            missing_list+="    - ${org}/${repo}"$'\n'
+         fi
+      done <<< "$repos"
+      printf '    have=%s, missing=%s\n' "$have_count" "$missing_count"
+      if [ -n "$missing_list" ]; then
+         printf '%s' "$missing_list"
+      fi
+   fi
+}
+
+## Per-repo settings - only the ones with no org-wide alternative.
+## With the org-level rulesets and enable_all calls in apply_org_policy,
+## the per-repo loop has shrunk to wiki-off / issues-on (these have no
+## "apply to all repos" org endpoint).
+apply_repo_policy() {
+   local owner="$1" repo="$2"
+   ghorg_validate_name "$owner" user || return 1
+   ghorg_validate_name "$repo"  repo || return 1
+
+   local patch
+   patch="$(jq -n '{has_wiki: false, has_issues: true}')"
+   api_call "${owner}/${repo}: wiki=off, issues=on" \
+      PATCH "/repos/${owner}/${repo}" "$patch" || true
+}
+
+main() {
+   local org repos
+   if [ "$mode" = 'audit' ]; then
+      for org in "${ORGS[@]}"; do
+         audit_org_state "$org"
+      done
+      return 0
+   fi
+
+   ## Set up the tally tempfile before any api_call runs. Children
+   ## from the per-repo parallel loop inherit api_counter_file via
+   ## environment so their api_record appends land in the same file.
+   api_counter_file="$(mktemp)"
+   export api_counter_file
+   trap 'rm -f -- "$api_counter_file"' EXIT
+
+   for org in "${ORGS[@]}"; do
+      apply_org_policy "$org"
+
+      printf '\n=== repo policy: %s ===\n' "$org"
+      ## Public, non-archived, non-fork repos. The org-level enable_all
+      ## endpoints already cover security products on every repo; this
+      ## loop is just for has_wiki / has_issues which have no org-wide
+      ## API.
+      repos="$(ghorg_list_repos "$org" 0 0 0 | sort -u)"
+      if [ -z "$repos" ]; then
+         printf 'no repos matched in %s\n' "$org" >&2
+         continue
+      fi
+
+      local active=0
+      while IFS= read -r repo; do
+         [ -z "$repo" ] && continue
+         apply_repo_policy "$org" "$repo" &
+         active=$(( active + 1 ))
+         if [ "$active" -ge "$POLICY_JOBS" ]; then
+            wait -n || true
+            active=$(( active - 1 ))
+         fi
+      done <<< "$repos"
+      wait
+   done
+
+   ## End-of-run summary. Each api_call / record_skip appended one
+   ## line per event; sum by status.
+   local n_ok n_warn n_dry n_skip
+   n_ok="$(  grep --count -- '^ok$'   "$api_counter_file" 2>/dev/null || true)"
+   n_warn="$(grep --count -- '^warn$' "$api_counter_file" 2>/dev/null || true)"
+   n_dry="$( grep --count -- '^dry$'  "$api_counter_file" 2>/dev/null || true)"
+   n_skip="$(grep --count -- '^skip$' "$api_counter_file" 2>/dev/null || true)"
+   ## grep returns "" when the file is empty; normalize to 0.
+   n_ok="${n_ok:-0}"; n_warn="${n_warn:-0}"
+   n_dry="${n_dry:-0}"; n_skip="${n_skip:-0}"
+
+   printf '\n=== summary ===\n'
+   printf '  ok:      %s\n' "$n_ok"
+   printf '  warn:    %s\n' "$n_warn"
+   printf '  dry-run: %s\n' "$n_dry"
+   printf '  skip:    %s   (UI-only; see "skip:" lines above)\n' "$n_skip"
+   printf '\ndone.\n'
+
+   ## Non-zero exit if anything went wrong, so callers (cron, CI) can
+   ## react. dry-run + skip are not failures.
+   if [ "$n_warn" -gt 0 ]; then
+      return 1
+   fi
+}
+
+main

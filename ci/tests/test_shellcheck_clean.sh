@@ -1,0 +1,70 @@
+#!/bin/bash
+
+## Copyright (C) 2026 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+## AI-Assisted
+
+## Mock-API test: every github-org-* / dm-github-policy / dm-fork-sync
+## tool, the shared github-org-lib, and every ci/tests/*.sh script
+## must pass shellcheck cleanly. The project-wide .shellcheckrc at
+## the repo root applies; this test catches regressions before they
+## reach a reviewer.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+
+if [ "${CI:-}" != "true" ]; then
+   printf 'error: this script must run with CI=true (GitHub Actions or equivalent).\n' >&2
+   exit 1
+fi
+
+if ! command -v shellcheck >/dev/null 2>&1; then
+   printf 'error: shellcheck not found on PATH; install via apt.\n' >&2
+   exit 1
+fi
+
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
+
+## Files this test owns. Keep the list explicit rather than globbing
+## the whole repo - the github-org-* tools and the dm-* wrappers are
+## the surface this PR introduced; other parts of developer-meta-files
+## have their own pre-existing shellcheck status that is out of scope.
+files=(
+   "$REPO_ROOT/usr/bin/github-org-clone"
+   "$REPO_ROOT/usr/bin/github-org-fork"
+   "$REPO_ROOT/usr/bin/github-org-push"
+   "$REPO_ROOT/usr/bin/github-org-set-fork-approval"
+   "$REPO_ROOT/usr/bin/dm-github-policy"
+   "$REPO_ROOT/usr/bin/dm-fork-sync"
+   "$REPO_ROOT/usr/libexec/developer-meta-files/github-org-lib.bsh"
+   "$REPO_ROOT/ci/test-github-org-tools.sh"
+   "$REPO_ROOT/ci/install-genmkfile.sh"
+   "$REPO_ROOT/ci/install-helper-scripts.sh"
+   "$REPO_ROOT/ci/probe-live-unauth.sh"
+)
+## Append every test_*.sh under ci/tests so adding a new test
+## automatically subjects it to the same check.
+while IFS= read -r -d '' script_path; do
+   files+=( "$script_path" )
+done < <(find -- "$REPO_ROOT/ci/tests" -mindepth 1 -maxdepth 1 \
+         -type f -name 'test_*.sh' -print0 | sort --zero-terminated)
+
+fail=0
+for script_path in "${files[@]}"; do
+   if [ ! -r "$script_path" ]; then
+      printf 'FAIL: not readable: %s\n' "$script_path" >&2
+      fail=1
+      continue
+   fi
+   if ! shellcheck -- "$script_path"; then
+      fail=1
+   fi
+done
+
+exit "$fail"

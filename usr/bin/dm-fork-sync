@@ -1,0 +1,78 @@
+#!/bin/bash
+
+## Copyright (C) 2026 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+## AI-Assisted
+
+## Project-policy wrapper around `github-org-fork`. Mirrors Kicksecure
+## and Whonix into the assisted-by-ai bot account. Run
+## `dm-fork-sync --help` for the policy flags applied.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+
+readonly MIRROR='assisted-by-ai'
+## Production list (commented out while testing on org-ai-assisted):
+# readonly SOURCE_ORGS=( 'Kicksecure' 'Whonix' )
+readonly SOURCE_ORGS=( 'org-ai-assisted' )
+
+readonly POLICY_FLAGS=(
+   --disable-issues
+   --disable-wiki
+   --disable-projects
+   --actions enable
+   --workflow-perms read
+)
+
+show_help() {
+   cat <<'EOF'
+Project-policy wrapper around github-org-fork (from helper-scripts).
+Mirrors the Kicksecure and Whonix orgs into the assisted-by-ai bot
+account with the settings the project requires:
+
+  - private source repos skipped
+  - issues, wiki, projects disabled on each mirror
+  - GitHub Actions enabled on each mirror (so Claude Code can read
+    CI logs from the mirror)
+  - in-workflow GITHUB_TOKEN constrained to read-only by default
+
+Usage:
+  dm-fork-sync             ## sync all source orgs into the mirror
+  dm-fork-sync --dry-run   ## report planned actions only
+  dm-fork-sync --help
+
+All extra flags are forwarded to github-org-fork, so --dry-run, -v,
+--include / --exclude REGEX, etc. all work.
+
+Auth: $GITHUB_TOKEN env var, or chmod-600 ~/.config/github-token.
+The token must belong to the assisted-by-ai user (forks land in
+whichever user the token authenticates).
+EOF
+}
+
+## Intercept --help / -h up front so 'dm-fork-sync --help' prints
+## this wrapper's usage instead of running github-org-fork --help
+## once per source org.
+for arg in "$@"; do
+   case "$arg" in
+      -h|--help)
+         show_help
+         exit 0
+         ;;
+   esac
+done
+
+if ! command -v github-org-fork >/dev/null 2>&1; then
+   printf 'error: github-org-fork not found on PATH (developer-meta-files install incomplete).\n' >&2
+   exit 1
+fi
+
+for src in "${SOURCE_ORGS[@]}"; do
+   printf '\n=== %s -> %s ===\n' "$src" "$MIRROR"
+   github-org-fork "${POLICY_FLAGS[@]}" "$@" -- "$src" "$MIRROR"
+done

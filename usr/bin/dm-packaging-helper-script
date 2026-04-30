@@ -653,7 +653,11 @@ get_package_documentation_info_list() {
 ## TODO: Use this function as the single source of truth for most of these
 ## remote names, rather than duplicating info.
 set_batch_current_package_remote_list() {
-   batch_current_package_remote_list=( "github-${batch_current_project_name,,}" )
+   ## Production mirror is the assisted-by-ai user account; commented
+   ## out while testing on the org-ai-assisted org. Swap the comment
+   ## to switch back.
+   # batch_current_package_remote_list=( "github-${batch_current_project_name,,}" "assisted-by-ai" )
+   batch_current_package_remote_list=( "github-${batch_current_project_name,,}" "org-ai-assisted" )
    ## derivative-maker has a couple extra remotes
    if [ "${batch_current_package_reponame}" = 'derivative-maker' ]; then
       batch_current_package_remote_list+=( 'github-kicksecure' 'github-whonix' )
@@ -1113,6 +1117,11 @@ pkg_git_remotes_add() {
 
    git remote add     assisted-by-ai         "git@github.com:assisted-by-ai/${batch_current_package_reponame}.git" || true
    git remote set-url assisted-by-ai         "git@github.com:assisted-by-ai/${batch_current_package_reponame}.git" || true
+
+   ## Test target: the org-ai-assisted org. Defined here so the mirror
+   ## remote in set_batch_current_package_remote_list resolves.
+   git remote add     org-ai-assisted        "git@github.com:org-ai-assisted/${batch_current_package_reponame}.git" || true
+   git remote set-url org-ai-assisted        "git@github.com:org-ai-assisted/${batch_current_package_reponame}.git" || true
 
    git remote add     adrelanos         "git@github.com:adrelanos/${batch_current_package_reponame}.git" || true
    git remote set-url adrelanos         "git@github.com:adrelanos/${batch_current_package_reponame}.git" || true
