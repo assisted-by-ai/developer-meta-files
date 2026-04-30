@@ -1,0 +1,150 @@
+#!/bin/bash
+
+## Copyright (C) 2026 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+## AI-Assisted
+
+## Set an org's GitHub Actions fork-PR contributor approval policy.
+## Default policy: all_external_contributors (maintainer approves
+## every fork PR run, not just first-timers). Run
+## `github-org-set-fork-approval --help` for full usage.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+
+# shellcheck source=../libexec/developer-meta-files/github-org-lib.bsh
+source /usr/libexec/developer-meta-files/github-org-lib.bsh
+
+mode='set'        ## set | get
+dry_run=0
+verbose=0
+
+show_help() {
+  cat <<'EOF'
+Set the org-level approval policy for GitHub Actions workflow runs
+triggered by pull requests from forks. Useful where outside
+collaborators occasionally open PRs whose workflow execution should
+be inspected first (resource use, supply-chain exposure, secret
+leakage from pull_request trigger misuse).
+
+Usage:
+  github-org-set-fork-approval [OPTIONS] <org> [<policy>]
+
+Positional:
+  <org>      organization name (must be an Organization, not a User)
+  <policy>   approval_policy value (default: all_external_contributors)
+             valid values:
+               - all_external_contributors
+               - first_time_contributors
+               - first_time_contributors_new_to_github
+
+Options:
+  --get      print the current setting and exit, do nothing else
+  --dry-run  print the planned change but do not apply it
+  -v, --verbose
+  -h, --help
+
+Auth:
+  $GITHUB_TOKEN env var, or chmod-600 ~/.config/github-token. Token
+  needs the admin:org scope.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --get)        mode='get'; shift ;;
+    --dry-run)    dry_run=1; shift ;;
+    -v|--verbose) verbose=1; shift ;;
+    -h|--help)    show_help; exit 0 ;;
+    --) shift; break ;;
+    -*) printf 'unknown option: %s\n' "$1" >&2; exit 64 ;;
+    *)  break ;;
+  esac
+done
+
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+  show_help >&2
+  exit 64
+fi
+
+org="$1"
+policy="${2:-all_external_contributors}"
+
+case "$policy" in
+  all_external_contributors|first_time_contributors|first_time_contributors_new_to_github) ;;
+  *)
+    printf 'invalid policy: %s\n' "$(ghorg_safe_print 64 "$policy")" >&2
+    printf 'valid: all_external_contributors, first_time_contributors, first_time_contributors_new_to_github\n' >&2
+    exit 64
+    ;;
+esac
+
+ghorg_require_deps
+
+## Validate the org name and confirm it really is an Organization,
+## not a User. The fork-PR approval policy endpoint exists only on
+## orgs; calling it on a user account would 404.
+ghorg_validate_name "$org" user || exit 1
+account_type="$(ghorg_account_type "$org")"
+if [ "$account_type" != 'Organization' ]; then
+  printf 'error: %s is a %s, not an Organization; this setting is org-only\n' \
+    "$(ghorg_safe_print 64 "$org")" "$account_type" >&2
+  exit 1
+fi
+
+api_path="/orgs/${org}/actions/permissions/fork-pr-contributor-approval"
+
+current_policy() {
+  local result status body
+  result="$(ghorg_api GET "$api_path")" || return 1
+  status="$(ghorg_status_of "$result")"
+  body="$(ghorg_body_of "$result")"
+  if [ "$status" != '200' ]; then
+    printf 'error: GET %s: HTTP %s\n%s\n' \
+      "$api_path" "$status" "$(ghorg_safe_print 512 "$body")" >&2
+    return 1
+  fi
+  printf '%s' "$body" | jq -r '.approval_policy // "(unset)"'
+}
+
+case "$mode" in
+  get)
+    printf 'org: %s\n' "$org"
+    printf 'current approval_policy: %s\n' "$(current_policy)"
+    ;;
+  set)
+    cur="$(current_policy)"
+    printf 'org: %s\n' "$org"
+    printf 'current approval_policy: %s\n' "$cur"
+    printf 'desired approval_policy: %s\n' "$policy"
+    if [ "$cur" = "$policy" ]; then
+      printf 'no change needed.\n'
+      exit 0
+    fi
+    if [ "$dry_run" = '1' ]; then
+      printf 'DRY-RUN: would PUT %s approval_policy=%s\n' "$api_path" "$policy"
+      exit 0
+    fi
+    body="$(jq -n --arg p "$policy" '{approval_policy: $p}')"
+    result="$(ghorg_api PUT "$api_path" "$body")"
+    status="$(ghorg_status_of "$result")"
+    case "$status" in
+      204|200)
+         printf 'updated approval_policy=%s on %s\n' "$policy" "$org"
+         [ "$verbose" = '1' ] && printf 'response body: %s\n' \
+           "$(ghorg_safe_print 512 "$(ghorg_body_of "$result")")"
+         ;;
+      *)
+         printf 'error: PUT %s: HTTP %s\n%s\n' \
+           "$api_path" "$status" \
+           "$(ghorg_safe_print 512 "$(ghorg_body_of "$result")")" >&2
+         exit 1
+         ;;
+    esac
+    ;;
+esac

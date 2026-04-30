@@ -1,0 +1,93 @@
+---
+## Copyright (C) 2026 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+## AI-Assisted
+
+## Manual-trigger live-API audit. Runs `dm-github-policy --audit`
+## against the real GitHub REST API using the GHORG_AUDIT_TOKEN repo
+## secret (a fine-grained PAT scoped read-only to org-ai-assisted).
+## No writes; no fork CI; only fires when an authorized user clicks
+## "Run workflow" from the Actions tab.
+##
+## To enable:
+##   1. Mint a fine-grained PAT under the user that owns
+##      org-ai-assisted access (read-only on Repository:
+##      Administration/Contents/Metadata/Webhooks and Organization:
+##      Administration/Members/Webhooks).
+##   2. Settings -> Secrets and variables -> Actions -> New repository
+##      secret named GHORG_AUDIT_TOKEN.
+##   3. Actions tab -> "github-org tools (live audit)" workflow ->
+##      Run workflow.
+##
+## To revoke: delete the secret in the same UI, or revoke the PAT in
+## the user's Developer settings.
+
+name: github-org tools (live audit)
+
+on:
+  workflow_dispatch:
+
+## Read-only on the checked-out source. The audit does not touch the
+## repository content; it only calls the GitHub REST API.
+permissions:
+  contents: read
+
+jobs:
+  live-audit:
+    name: dm-github-policy --audit (live)
+    runs-on: ubuntu-latest
+    container:
+      image: debian:trixie
+
+    ## Skip on forks so a fork's workflow can never use the upstream
+    ## secret (GitHub also blocks this by default for forked PRs, but
+    ## the explicit guard documents intent).
+    if: ${{ github.repository == 'assisted-by-ai/developer-meta-files' }}
+
+    steps:
+      - name: Install apt pre-reqs
+        run: |
+          set -o errexit
+          set -o nounset
+          set -o pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install --yes --no-install-recommends -- \
+            ca-certificates curl jq git sudo build-essential dctrl-tools \
+            python3
+
+      - name: Checkout developer-meta-files
+        uses: actions/checkout@v6
+
+      - name: Install genmkfile
+        env:
+          CI: "true"
+        run: ./ci/install-genmkfile.sh
+
+      - name: Install helper-scripts (provides sanitize-string)
+        env:
+          CI: "true"
+        run: ./ci/install-helper-scripts.sh
+
+      - name: Install developer-meta-files
+        run: GENMKFILE_DEBUG=1 genmkfile install
+
+      - name: Verify token secret is set
+        env:
+          token_present: ${{ secrets.GHORG_AUDIT_TOKEN != '' }}
+        run: |
+          set -o errexit
+          set -o nounset
+          set -o pipefail
+          if [ "$token_present" != 'true' ]; then
+             printf 'error: GHORG_AUDIT_TOKEN secret is not set on this repo.\n' >&2
+             printf '       Add it under Settings -> Secrets and variables -> Actions.\n' >&2
+             exit 1
+          fi
+          printf 'GHORG_AUDIT_TOKEN secret detected.\n'
+
+      - name: Run dm-github-policy --audit (live)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GHORG_AUDIT_TOKEN }}
+        run: dm-github-policy --audit

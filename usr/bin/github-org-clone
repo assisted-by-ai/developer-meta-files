@@ -1,0 +1,199 @@
+#!/bin/bash
+
+## Copyright (C) 2026 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+## AI-Assisted
+
+## Clone (or fast-forward) every public, non-archived, non-fork repo of
+## a GitHub user/organization into <dest-dir>/<repo-name>/. Idempotent.
+## Run `github-org-clone --help` for full usage.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+
+# shellcheck source=../libexec/developer-meta-files/github-org-lib.bsh
+source /usr/libexec/developer-meta-files/github-org-lib.bsh
+
+include_private=0
+include_archived=0
+include_forks=0
+include_re=''
+exclude_re=''
+shallow=0
+url_scheme='ssh'
+jobs=4
+dry_run=0
+verbose=0
+
+show_help() {
+  cat <<'EOF'
+Clone or update every selected repo of a GitHub user/organization
+into a local directory tree. Idempotent - re-running fetches and
+fast-forwards each existing clone, never merging or rebasing.
+
+Usage:
+  github-org-clone [OPTIONS] <source-org> [<dest-dir>]
+
+Layout:
+  <dest-dir>/<repo-name>/      ## one git checkout per repo, flat
+
+Options:
+  --include-private    include private repos (default: skip)
+  --include-archived   include archived repos (default: skip)
+  --include-forks      include fork repos     (default: skip)
+  --include REGEX      only repos whose name matches REGEX
+  --exclude REGEX      drop repos whose name matches REGEX
+  --shallow            clone with --depth=1 (no update support)
+  --ssh                use git@github.com:... URLs (default)
+  --https              use https://github.com/... URLs
+  --jobs N             parallel clones/fetches (default: 4)
+  --dry-run            report planned actions, do nothing
+  -v, --verbose        print each git command
+  -h, --help           show this help and exit
+
+Auth (optional for public reads):
+  $GITHUB_TOKEN env var, or chmod-600 ~/.config/github-token. Without
+  a token, requests go out unauthenticated and are subject to GitHub's
+  60-req/hr-per-IP rate limit.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --include-private)  include_private=1; shift ;;
+    --include-archived) include_archived=1; shift ;;
+    --include-forks)    include_forks=1; shift ;;
+    --include) include_re="$2"; shift 2 ;;
+    --exclude) exclude_re="$2"; shift 2 ;;
+    --shallow) shallow=1; shift ;;
+    --ssh)     url_scheme='ssh'; shift ;;
+    --https)   url_scheme='https'; shift ;;
+    --jobs)    jobs="$2"; shift 2 ;;
+    --dry-run) dry_run=1; shift ;;
+    -v|--verbose) verbose=1; shift ;;
+    -h|--help) show_help; exit 0 ;;
+    --) shift; break ;;
+    -*) printf 'unknown option: %s\n' "$1" >&2; exit 64 ;;
+    *)  break ;;
+  esac
+done
+
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+  show_help >&2
+  exit 64
+fi
+
+source_org="$1"
+dest_dir="${2:-.}"
+
+ghorg_require_deps
+
+repo_url() {
+  local repo="$1"
+  case "$url_scheme" in
+    ssh)   printf 'git@github.com:%s/%s.git' "$source_org" "$repo" ;;
+    https) printf 'https://github.com/%s/%s.git' "$source_org" "$repo" ;;
+  esac
+}
+
+## Clone a missing repo or fast-forward an existing one. Each call is
+## standalone so it can be safely backgrounded for parallelism. Repo
+## name has already been validated by ghorg_list_repos before reaching
+## this point; we still re-validate defensively because nothing else
+## stops a caller from invoking this function with arbitrary input.
+clone_or_update_one() {
+  local repo="$1"
+  ghorg_validate_name "$repo" repo || return 0
+  local repo_dir="${dest_dir}/${repo}"
+  local url existing_url
+  url="$(repo_url "$repo")"
+
+  if [ -d "${repo_dir}/.git" ]; then
+    ## Origin-URL collision check: if an existing clone's origin
+    ## points elsewhere (because the operator reused dest_dir across
+    ## source orgs and a name collided), skip rather than silently
+    ## fetch from the wrong upstream.
+    existing_url="$(git -C "$repo_dir" remote get-url origin 2>/dev/null || true)"
+    if [ -n "$existing_url" ] && [ "$existing_url" != "$url" ]; then
+      printf 'warn: %s: origin is %s, expected %s; skipping (name collision?)\n' \
+        "$repo_dir" \
+        "$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$existing_url")" \
+        "$url" >&2
+      return 0
+    fi
+
+    if [ "$dry_run" = '1' ]; then
+      printf 'DRY-RUN: update %s\n' "$repo_dir"
+      return 0
+    fi
+    [ "$verbose" = '1' ] && printf 'update: %s\n' "$repo_dir"
+    ## --ff-only refuses anything that isn't a clean fast-forward; safer
+    ## than `pull` for unattended runs where divergence would otherwise
+    ## attempt a merge. `--` separates options from positional args
+    ## even though no operand is an option here - belt and braces.
+    git -C "$repo_dir" fetch --prune --tags -- origin
+    local current_branch
+    current_branch="$(git -C "$repo_dir" symbolic-ref --short HEAD 2>/dev/null || true)"
+    if [ -n "$current_branch" ]; then
+      ## @{u} is an unambiguous symbolic ref for the upstream of the
+      ## current branch - immune to tag/branch name collisions.
+      git -C "$repo_dir" merge --ff-only "@{u}" 2>/dev/null || \
+        printf 'warn: %s: %s not fast-forwardable, skipping merge\n' \
+          "$repo_dir" \
+          "$(ghorg_safe_print "$GHORG_MAX_REPO_NAME_LEN" "$current_branch")" >&2
+    fi
+  elif [ -e "$repo_dir" ]; then
+    printf 'warn: %s exists and is not a git checkout, skipping\n' "$repo_dir" >&2
+    return 0
+  else
+    if [ "$dry_run" = '1' ]; then
+      printf 'DRY-RUN: clone %s -> %s\n' "$url" "$repo_dir"
+      return 0
+    fi
+    [ "$verbose" = '1' ] && printf 'clone: %s\n' "$url"
+    local clone_args=( clone )
+    [ "$shallow" = '1' ] && clone_args+=( --depth=1 )
+    ## `--` ensures a hostile-looking URL or repo_dir starting with
+    ## `-` (which validation already rejects upstream) cannot be
+    ## interpreted as a git option.
+    clone_args+=( -- "$url" "$repo_dir" )
+    git "${clone_args[@]}"
+  fi
+}
+
+main() {
+  mkdir -p -- "$dest_dir"
+
+  local repos
+  repos="$(ghorg_list_repos "$source_org" \
+    "$include_private" "$include_archived" "$include_forks" \
+    | ghorg_filter_names "$include_re" "$exclude_re" \
+    | sort -u)"
+
+  if [ -z "$repos" ]; then
+    printf 'no repos matched.\n' >&2
+    return 0
+  fi
+
+  printf '%s repos to process under %s\n' "$(printf '%s\n' "$repos" | wc -l)" "$dest_dir"
+
+  ## Bounded parallelism: keep at most $jobs background jobs alive.
+  local active=0
+  while IFS= read -r repo; do
+    [ -z "$repo" ] && continue
+    clone_or_update_one "$repo" &
+    active=$(( active + 1 ))
+    if [ "$active" -ge "$jobs" ]; then
+      wait -n || true
+      active=$(( active - 1 ))
+    fi
+  done <<< "$repos"
+  wait
+}
+
+main

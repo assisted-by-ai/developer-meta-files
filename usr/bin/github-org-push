@@ -1,0 +1,255 @@
+#!/bin/bash
+
+## Copyright (C) 2026 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+## AI-Assisted
+
+## For each clone under <source-dir>, push HEAD (and optionally tags)
+## to a same-named repo in <target-owner>. Run `github-org-push --help`
+## for full usage.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+
+# shellcheck source=../libexec/developer-meta-files/github-org-lib.bsh
+source /usr/libexec/developer-meta-files/github-org-lib.bsh
+
+branches='HEAD'
+push_tags=0
+remote_name=''
+include_re=''
+exclude_re=''
+url_scheme='ssh'
+jobs=4
+create_missing=0
+dry_run=0
+verbose=0
+
+show_help() {
+  cat <<'EOF'
+For each git checkout under <source-dir>, push HEAD (and optionally
+tags) to a same-named repo in <target-owner> on GitHub. Useful as
+the third step of a clone -> fork -> push pipeline that keeps a
+mirror in sync with the upstream you cloned.
+
+Usage:
+  github-org-push [OPTIONS] <source-dir> <target-owner>
+
+Layout:
+  Expects <source-dir>/<repo-name>/.git, matching github-org-clone's
+  output. Subdirs that aren't git checkouts are ignored.
+
+Options:
+  --branches "a b c"   branches to push per repo (default: HEAD;
+                       HEAD = whichever branch is checked out)
+  --tags               also push tags (default: off)
+  --remote-name NAME   name of the git remote pointing at the
+                       target (default: target_owner value)
+  --include REGEX      only repos whose name matches REGEX
+  --exclude REGEX      drop repos whose name matches REGEX
+  --ssh                use git@github.com:... URLs (default)
+  --https              use https://github.com/... URLs
+  --jobs N             parallel pushes (default: 4)
+  --create-missing     reserved; not implemented
+  --dry-run            report planned actions, do nothing
+  -v, --verbose        print each git command
+  -h, --help           show this help and exit
+
+Refusal modes:
+  - Target repo does not exist: warn and skip (run github-org-fork
+    first to create it).
+  - Lookup itself fails for a non-404 reason (auth/rate-limit/network):
+    refuse to push to that repo and report; other repos continue.
+
+Auth:
+  $GITHUB_TOKEN env var, or chmod-600 ~/.config/github-token. Token
+  needs `repo` scope to push.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --branches) branches="$2"; shift 2 ;;
+    --tags)     push_tags=1; shift ;;
+    --remote-name) remote_name="$2"; shift 2 ;;
+    --include) include_re="$2"; shift 2 ;;
+    --exclude) exclude_re="$2"; shift 2 ;;
+    --ssh)     url_scheme='ssh'; shift ;;
+    --https)   url_scheme='https'; shift ;;
+    --jobs)    jobs="$2"; shift 2 ;;
+    --create-missing) create_missing=1; shift ;;
+    --dry-run) dry_run=1; shift ;;
+    -v|--verbose) verbose=1; shift ;;
+    -h|--help) show_help; exit 0 ;;
+    --) shift; break ;;
+    -*) printf 'unknown option: %s\n' "$1" >&2; exit 64 ;;
+    *)  break ;;
+  esac
+done
+
+if [ "$#" -ne 2 ]; then
+  show_help >&2
+  exit 64
+fi
+
+source_dir="$1"
+target_owner="$2"
+[ -z "$remote_name" ] && remote_name="$target_owner"
+
+ghorg_require_deps
+
+remote_url() {
+  local repo="$1"
+  case "$url_scheme" in
+    ssh)   printf 'git@github.com:%s/%s.git' "$target_owner" "$repo" ;;
+    https) printf 'https://github.com/%s/%s.git' "$target_owner" "$repo" ;;
+  esac
+}
+
+push_one() {
+  local repo_dir="$1"
+  local repo
+  repo="$(basename -- "$repo_dir")"
+
+  ## Validate the directory-derived name before using it as a URL or
+  ## API parameter. Same allowlist rules as for API-supplied names so
+  ## a hostile filesystem can't smuggle bad names either.
+  if ! ghorg_validate_name "$repo" repo; then
+    printf 'warn: skipping %s (invalid name)\n' \
+      "$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$repo_dir")" >&2
+    return 0
+  fi
+
+  ## Distinguish "missing" (404) from "lookup failed for some other
+  ## reason" (auth/rate limit/network). A skip is only safe when we
+  ## know for sure the repo isn't there; otherwise treat it as a hard
+  ## error so a bad token or transient outage doesn't silently no-op
+  ## an entire run.
+  ghorg_repo_lookup "$target_owner" "$repo"
+  case $? in
+    0) ;;
+    1)
+      if [ "$create_missing" = '1' ]; then
+        ## Reserved flag for future use; deliberately not implemented to
+        ## avoid surprise repo creation. github-org-fork is the supported
+        ## path for adding repos to the target.
+        printf 'warn: %s/%s missing - run github-org-fork to create it; skipping\n' \
+          "$target_owner" "$repo" >&2
+      else
+        printf 'warn: %s/%s does not exist on target, skipping\n' \
+          "$target_owner" "$repo" >&2
+      fi
+      return 0
+      ;;
+    *)
+      printf 'error: %s/%s lookup failed (auth or transient); not pushing\n' \
+        "$target_owner" "$repo" >&2
+      return 1
+      ;;
+  esac
+
+  local url
+  url="$(remote_url "$repo")"
+
+  if [ "$dry_run" = '1' ]; then
+    printf 'DRY-RUN: push %s -> %s (branches: %s, tags: %s)\n' \
+      "$repo_dir" "$url" "$branches" "$push_tags"
+    return 0
+  fi
+
+  ## Add or refresh the named remote unconditionally so URL drift is
+  ## corrected on every run.
+  if git -C "$repo_dir" remote get-url "$remote_name" >/dev/null 2>&1; then
+    git -C "$repo_dir" remote set-url "$remote_name" "$url"
+  else
+    git -C "$repo_dir" remote add "$remote_name" "$url"
+  fi
+
+  local branch resolved_head
+  for branch in $branches; do
+    if [ "$branch" = 'HEAD' ]; then
+      ## Resolve HEAD to a fully qualified ref locally first, so the
+      ## push is not vulnerable to tag/branch name ambiguity (e.g. a
+      ## tag named `master` shadowing the branch). symbolic-ref returns
+      ## refs/heads/<branch> for an attached HEAD; for a detached HEAD
+      ## it returns non-zero, which we treat as "skip with warning".
+      if ! resolved_head="$(git -C "$repo_dir" symbolic-ref HEAD 2>/dev/null)"; then
+        printf 'warn: %s: HEAD detached, skipping HEAD push\n' "$repo_dir" >&2
+        continue
+      fi
+      [ "$verbose" = '1' ] && printf 'push %s %s -> %s\n' \
+        "$resolved_head" "$repo_dir" "$remote_name"
+      git -C "$repo_dir" push -- "$remote_name" \
+        "${resolved_head}:${resolved_head}" || \
+        printf 'warn: %s: %s push to %s failed\n' \
+          "$repo_dir" "$resolved_head" "$remote_name" >&2
+    else
+      ## Validate the user-supplied branch name as a repo-name (same
+      ## allowlist) before constructing a fully-qualified ref. This
+      ## both blocks ref injection like `master HEAD` and prevents
+      ## tag/branch ambiguity (we always use refs/heads/...).
+      if ! ghorg_validate_name "$branch" repo; then
+        printf 'warn: %s: skipping invalid branch name\n' "$repo_dir" >&2
+        continue
+      fi
+      [ "$verbose" = '1' ] && printf 'push %s %s -> %s\n' "$branch" "$repo_dir" "$remote_name"
+      git -C "$repo_dir" push -- "$remote_name" \
+        "refs/heads/${branch}:refs/heads/${branch}" || \
+        printf 'warn: %s: branch %s push to %s failed\n' \
+          "$repo_dir" "$branch" "$remote_name" >&2
+    fi
+  done
+
+  if [ "$push_tags" = '1' ]; then
+    [ "$verbose" = '1' ] && printf 'push --tags %s -> %s\n' "$repo_dir" "$remote_name"
+    git -C "$repo_dir" push --tags -- "$remote_name" || \
+      printf 'warn: %s: tag push to %s failed\n' "$repo_dir" "$remote_name" >&2
+  fi
+}
+
+main() {
+  if [ ! -d "$source_dir" ]; then
+    printf 'error: source dir does not exist: %s\n' "$source_dir" >&2
+    exit 1
+  fi
+
+  ## Discover candidate clones: every immediate subdir that has a .git.
+  local candidates
+  candidates="$(find "$source_dir" -mindepth 1 -maxdepth 1 -type d \
+    -exec test -e '{}/.git' \; -print | sort -u)"
+
+  if [ -n "$include_re" ] || [ -n "$exclude_re" ]; then
+    candidates="$(printf '%s\n' "$candidates" | while IFS= read -r d; do
+      [ -z "$d" ] && continue
+      printf '%s\n' "$(basename -- "$d")"
+    done | ghorg_filter_names "$include_re" "$exclude_re" | while IFS= read -r name; do
+      printf '%s/%s\n' "$source_dir" "$name"
+    done)"
+  fi
+
+  if [ -z "$candidates" ]; then
+    printf 'no git checkouts found under %s\n' "$source_dir" >&2
+    return 0
+  fi
+
+  printf '%s repos to process\n' "$(printf '%s\n' "$candidates" | wc -l)"
+
+  local active=0
+  while IFS= read -r repo_dir; do
+    [ -z "$repo_dir" ] && continue
+    push_one "$repo_dir" &
+    active=$(( active + 1 ))
+    if [ "$active" -ge "$jobs" ]; then
+      wait -n || true
+      active=$(( active - 1 ))
+    fi
+  done <<< "$candidates"
+  wait
+}
+
+main
