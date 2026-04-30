@@ -653,11 +653,10 @@ get_package_documentation_info_list() {
 ## TODO: Use this function as the single source of truth for most of these
 ## remote names, rather than duplicating info.
 set_batch_current_package_remote_list() {
-   ## Production mirror is the assisted-by-ai user account; commented
-   ## out while testing on the org-ai-assisted org. Swap the comment
-   ## to switch back.
-   # batch_current_package_remote_list=( "github-${batch_current_project_name,,}" "assisted-by-ai" )
-   batch_current_package_remote_list=( "github-${batch_current_project_name,,}" "org-ai-assisted" )
+   #batch_current_package_remote_list=( "github-${batch_current_project_name,,}" "assisted-by-ai" )
+   #batch_current_package_remote_list=( "github-${batch_current_project_name,,}" "org-ai-assisted" )
+   batch_current_package_remote_list=( "github-${batch_current_project_name,,}" )
+
    ## derivative-maker has a couple extra remotes
    if [ "${batch_current_package_reponame}" = 'derivative-maker' ]; then
       batch_current_package_remote_list+=( 'github-kicksecure' 'github-whonix' )
