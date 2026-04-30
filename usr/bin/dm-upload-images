@@ -49,7 +49,7 @@ show_files() {
    done
 
    true "File list:"
-   printf "%s\n" "${upload_file_list[@]}"
+   printf '%s\n' "${upload_file_list[@]}"
 
    local upload_file_item
    for upload_file_item in "${upload_file_list[@]}"; do

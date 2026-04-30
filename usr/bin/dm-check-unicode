@@ -68,14 +68,14 @@ check_symlink() {
 
    if [ "${symlink_whitelist[$symlink]+_}" ]; then
       if [ "${symlink_whitelist[$symlink]}" == "$target" ]; then
-         printf "%s\n" "$0: INFO: Whitelisted symlink: '$symlink' -> '$target'" >/dev/null
+         printf '%s\n' "$0: INFO: Whitelisted symlink: '$symlink' -> '$target'" >/dev/null
          return 0
       fi
-      printf "%s\n" "$0: ERROR: Whitelisted symlink: '$symlink' but wrong target '$target'" >&2
+      printf '%s\n' "$0: ERROR: Whitelisted symlink: '$symlink' but wrong target '$target'" >&2
       return 1
    fi
 
-   printf "%s\n" "$0: ERROR: NOT whitelisted symlink: '$symlink' -> '$target'" >&2
+   printf '%s\n' "$0: ERROR: NOT whitelisted symlink: '$symlink' -> '$target'" >&2
    return 1
 }
 
@@ -87,7 +87,7 @@ find_symlinks() {
          continue
       fi
       found_symlink=true
-      printf "%s\n" "----------" >&2
+      printf '%s\n' "----------" >&2
    ## Need to use '"."' for relative paths.
    done < <(find "." -type l -not -iwholename '*.git*' -print0)
    if [ "$found_symlink" = "true" ]; then
@@ -135,14 +135,14 @@ whitelist_list=(
 )
 whitelist_pattern="($(IFS=$'\n'; printf '%s' "${whitelist_list[*]}" | sed -z 's/\n/|/g'))";
 
-filtered_output=$(printf "%s\n" "$grep_find_unicode_wrapper_output" | grep --invert-match --extended-regexp -- "$whitelist_pattern" || true)
+filtered_output=$(printf '%s\n' "$grep_find_unicode_wrapper_output" | grep --invert-match --extended-regexp -- "$whitelist_pattern" || true)
 
 if [ -z "$filtered_output" ]; then
    true "INFO: No Unicode issues found, everything is OK."
 else
-   printf "%s\n" "$filtered_output" >&2
+   printf '%s\n' "$filtered_output" >&2
 
-   printf "%s\n" "\
+   printf '%s\n' "\
 $0: ERROR: Unicode found!
 
 See also:
@@ -243,7 +243,7 @@ done <<< "$grep_missing_newline_result_raw"
 if [ "${#grep_missing_newline_result_filtered[@]}" -eq "0" ]; then
    true "INFO: No missing newlines at the end of file issues found, everything is OK."
 else
-   printf "%s\n" "$0: ERROR: Missing newlines at the end of file found! grep_missing_newline_result_filtered:
+   printf '%s\n' "$0: ERROR: Missing newlines at the end of file found! grep_missing_newline_result_filtered:
 ${grep_missing_newline_result_filtered[*]}"
    exit 1
 fi

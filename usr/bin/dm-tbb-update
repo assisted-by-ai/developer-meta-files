@@ -21,11 +21,11 @@ source "$derivative_maker_source_code_dir/help-steps/pre"
 
 version_check() {
    if [ "${1,,}" = "" ]; then
-      printf "%s\n" "${red}${bold}FATAL ERROR: Invalid version (empty)!${reset}"
+      printf '%s\n' "${red}${bold}FATAL ERROR: Invalid version (empty)!${reset}"
       exit 1
    fi
    if [ "${1,,}" = "unknown" ]; then
-      printf "%s\n" "${red}${bold}FATAL ERROR: Invalid version (unknown)!${reset}"
+      printf '%s\n' "${red}${bold}FATAL ERROR: Invalid version (unknown)!${reset}"
       exit 1
    fi
 }
@@ -53,11 +53,11 @@ pkg_tor_browser_version_update() {
    ## path (including the early `exit 0` for "nothing to commit") so
    ## the operator can find it.
    # shellcheck disable=SC2317
-   trap 'printf "%s\n" "INFO: RecommendedTBBVersions tmp file kept for review: ${RecommendedTBBVersions}"' EXIT
+   trap 'printf '%s\n' "INFO: RecommendedTBBVersions tmp file kept for review: ${RecommendedTBBVersions}"' EXIT
 
    pushd -- "${derivative_maker_source_code_dir}/packages/kicksecure/tb-updater"
    if ! nothing_to_commit; then
-      printf "%s\n" "${red}${bold}FATAL ERROR: Uncommitted changes!${reset}"
+      printf '%s\n' "${red}${bold}FATAL ERROR: Uncommitted changes!${reset}"
       exit 1
    fi
    popd
@@ -66,7 +66,7 @@ pkg_tor_browser_version_update() {
    ## tbbversion sets: ${tbb_version_stripped}
    2>/dev/null scurl --output "${RecommendedTBBVersions}" "${tbb_stable_json_url}"
    tbbversion || {
-      printf "%s\n" "${red}${bold}FATAL ERROR: Could not parse stable TBB version JSON!${reset}"
+      printf '%s\n' "${red}${bold}FATAL ERROR: Could not parse stable TBB version JSON!${reset}"
       exit 1
    }
    version_check "${tbb_version_stripped}"
@@ -75,7 +75,7 @@ pkg_tor_browser_version_update() {
 
    2>/dev/null scurl --output "${RecommendedTBBVersions}" "${tbb_alpha_json_url}"
    tbbversion || {
-      printf "%s\n" "${red}${bold}FATAL ERROR: Could not parse alpha TBB version JSON!${reset}"
+      printf '%s\n' "${red}${bold}FATAL ERROR: Could not parse alpha TBB version JSON!${reset}"
       exit 1
    }
    version_check "${tbb_version_stripped}"
@@ -83,10 +83,10 @@ pkg_tor_browser_version_update() {
    current_tbb_alpha_version="${tbb_version_stripped}"
 
    safe-rm -f -- "${tbb_hardcoded_version_file}"
-   printf "%s\n" "tbb_hardcoded_version=\"${current_tbb_version}\"" | sponge -a -- "${tbb_hardcoded_version_file}"
+   printf '%s\n' "tbb_hardcoded_version=\"${current_tbb_version}\"" | sponge -a -- "${tbb_hardcoded_version_file}"
 
    safe-rm -f -- "${tbb_hardcoded_version_alpha_file}"
-   printf "%s\n" "tbb_hardcoded_version=\"${current_tbb_alpha_version}\"" | sponge -a -- "${tbb_hardcoded_version_alpha_file}"
+   printf '%s\n' "tbb_hardcoded_version=\"${current_tbb_alpha_version}\"" | sponge -a -- "${tbb_hardcoded_version_alpha_file}"
 
    pushd -- "${derivative_maker_source_code_dir}/packages/kicksecure/tb-updater"
 
