@@ -641,13 +641,32 @@ audit_org_state() {
       "/orgs/${org}/actions/permissions/workflow" \
       '"default=" + (.default_workflow_permissions // "?") + ", can_approve_PRs=" + ((.can_approve_pull_request_reviews // false) | tostring)'
 
-   audit_get 'actions allowed_actions' \
-      "/orgs/${org}/actions/permissions" \
-      '"enabled_repos=" + (.enabled_repositories // "?") + ", allowed_actions=" + (.allowed_actions // "?")'
+   ## Capture allowed_actions inline so we can decide whether the
+   ## selected-actions endpoint is meaningful. GitHub returns 409 on
+   ## /actions/permissions/selected-actions when allowed_actions is
+   ## not "selected" - audit shouldn't print a noisy HTTP 409 for
+   ## that expected case; it should print "(N/A)" with the reason.
+   local _ap_result _ap_status _ap_body allowed_actions=''
+   _ap_result="$(ghorg_api GET "/orgs/${org}/actions/permissions")" || true
+   _ap_status="$(ghorg_status_of "$_ap_result")"
+   if [ "$_ap_status" = '200' ]; then
+      _ap_body="$(ghorg_body_of "$_ap_result")"
+      allowed_actions="$(printf '%s' "$_ap_body" | jq --raw-output '.allowed_actions // "?"')"
+      printf '  actions allowed_actions: enabled_repos=%s, allowed_actions=%s\n' \
+         "$(printf '%s' "$_ap_body" | jq --raw-output '.enabled_repositories // "?"')" \
+         "$allowed_actions"
+   else
+      printf '  actions allowed_actions: HTTP %s\n' "$_ap_status"
+   fi
 
-   audit_get 'selected-actions allow-list' \
-      "/orgs/${org}/actions/permissions/selected-actions" \
-      '"github_owned=" + ((.github_owned_allowed // false) | tostring) + ", verified=" + ((.verified_allowed // false) | tostring) + ", patterns=" + ((.patterns_allowed // []) | length | tostring)'
+   if [ "$allowed_actions" = 'selected' ]; then
+      audit_get 'selected-actions allow-list' \
+         "/orgs/${org}/actions/permissions/selected-actions" \
+         '"github_owned=" + ((.github_owned_allowed // false) | tostring) + ", verified=" + ((.verified_allowed // false) | tostring) + ", patterns=" + ((.patterns_allowed // []) | length | tostring)'
+   else
+      printf '  selected-actions allow-list: (N/A while allowed_actions=%s)\n' \
+         "${allowed_actions:-?}"
+   fi
 
    audit_get '2FA required for org members' \
       "/orgs/${org}" \
