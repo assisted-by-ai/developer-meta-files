@@ -17,7 +17,8 @@ shopt -s inherit_errexit
 shopt -s shift_verbose
 
 if [ "${CI:-}" != "true" ]; then
-   printf 'error: this script must run with CI=true (GitHub Actions or equivalent).\n' >&2
+   printf '%s\n' \
+      'error: this script must run with CI=true (GitHub Actions or equivalent).' >&2
    exit 1
 fi
 
@@ -26,9 +27,14 @@ source /usr/libexec/developer-meta-files/github-org-lib.bsh
 
 fail=0
 expect() {
-  local desc="$1" want="$2" got="$3"
+  local desc want got want_q got_q
+  desc="$1"
+  want="$2"
+  got="$3"
   if [ "$got" != "$want" ]; then
-    printf 'FAIL: %s: want %q got %q\n' "$desc" "$want" "$got" >&2
+    want_q="$(printf '%q' "$want")"
+    got_q="$(printf '%q' "$got")"
+    printf '%s\n' "FAIL: $desc: want $want_q got $got_q" >&2
     fail=1
   fi
 }
@@ -46,29 +52,49 @@ hdr="$(mktemp)"
 ## (not an inline command string) so the trap is auditable.
 test_rate_limit_retry_cleanup_hdr() {
    # shellcheck disable=SC2317  ## invoked indirectly via trap
-   rm -f -- "$hdr"
+   safe-rm --force -- "$hdr"
 }
 trap test_rate_limit_retry_cleanup_hdr EXIT
-printf 'HTTP/2 429\r\nRetry-After: 17\r\nX-RateLimit-Reset: 99999999999\r\n\r\n' > "$hdr"
-expect 'parse Retry-After' '17' "$(ghorg_parse_rate_limit_wait "$hdr")"
+printf '%s\r\n' \
+  'HTTP/2 429' \
+  'Retry-After: 17' \
+  'X-RateLimit-Reset: 99999999999' \
+  '' > "$hdr"
+parsed_retry_after="$(ghorg_parse_rate_limit_wait "$hdr")"
+expect 'parse Retry-After' '17' "$parsed_retry_after"
 
 ## X-RateLimit-Reset used as fallback. Check just that we get a
 ## non-empty positive integer for a reset 10 seconds in the future.
-future=$(( $(date -u +%s) + 10 ))
-printf 'HTTP/2 403\r\nX-RateLimit-Remaining: 0\r\nX-RateLimit-Reset: %s\r\n\r\n' "$future" > "$hdr"
+now_seconds="$(date -u +%s)"
+future=$(( now_seconds + 10 ))
+printf '%s\r\n' \
+  'HTTP/2 403' \
+  'X-RateLimit-Remaining: 0' \
+  "X-RateLimit-Reset: $future" \
+  '' > "$hdr"
 got="$(ghorg_parse_rate_limit_wait "$hdr")"
 if [ -z "$got" ] || ! [[ "$got" =~ ^[0-9]+$ ]]; then
-  printf 'FAIL: parse X-RateLimit-Reset: got %q\n' "$got" >&2
+  got_q="$(printf '%q' "$got")"
+  printf '%s\n' "FAIL: parse X-RateLimit-Reset: got $got_q" >&2
   fail=1
 fi
 
 ## Reset already in the past -> empty (caller falls back to backoff).
-past=$(( $(date -u +%s) - 100 ))
-printf 'HTTP/2 403\r\nX-RateLimit-Reset: %s\r\n\r\n' "$past" > "$hdr"
-expect 'parse stale reset' '' "$(ghorg_parse_rate_limit_wait "$hdr")"
+now_seconds="$(date -u +%s)"
+past=$(( now_seconds - 100 ))
+printf '%s\r\n' \
+  'HTTP/2 403' \
+  "X-RateLimit-Reset: $past" \
+  '' > "$hdr"
+parsed_stale="$(ghorg_parse_rate_limit_wait "$hdr")"
+expect 'parse stale reset' '' "$parsed_stale"
 
 ## No relevant header -> empty.
-printf 'HTTP/2 200\r\nServer: github.com\r\n\r\n' > "$hdr"
-expect 'parse no rate-limit hdr' '' "$(ghorg_parse_rate_limit_wait "$hdr")"
+printf '%s\r\n' \
+  'HTTP/2 200' \
+  'Server: github.com' \
+  '' > "$hdr"
+parsed_no_hdr="$(ghorg_parse_rate_limit_wait "$hdr")"
+expect 'parse no rate-limit hdr' '' "$parsed_no_hdr"
 
 exit "$fail"

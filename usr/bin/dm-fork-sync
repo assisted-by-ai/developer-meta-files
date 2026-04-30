@@ -68,11 +68,11 @@ for arg in "$@"; do
 done
 
 if ! command -v github-org-fork >/dev/null 2>&1; then
-   printf 'error: github-org-fork not found on PATH (developer-meta-files install incomplete).\n' >&2
+   printf '%s\n' 'error: github-org-fork not found on PATH (developer-meta-files install incomplete).' >&2
    exit 1
 fi
 
 for src in "${SOURCE_ORGS[@]}"; do
-   printf '\n=== %s -> %s ===\n' "$src" "$MIRROR"
+   printf '\n%s\n' "=== ${src} -> ${MIRROR} ==="
    github-org-fork "${POLICY_FLAGS[@]}" "$@" -- "$src" "$MIRROR"
 done

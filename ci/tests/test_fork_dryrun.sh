@@ -17,7 +17,8 @@ shopt -s inherit_errexit
 shopt -s shift_verbose
 
 if [ "${CI:-}" != "true" ]; then
-   printf 'error: this script must run with CI=true (GitHub Actions or equivalent).\n' >&2
+   printf '%s\n' \
+      'error: this script must run with CI=true (GitHub Actions or equivalent).' >&2
    exit 1
 fi
 
@@ -34,15 +35,16 @@ export GHORG_MOCK_DIR="$FIXTURE_DIR"
 out="$(github-org-fork --dry-run org-ai-assisted assisted-by-ai 2>&1)"
 
 if ! grep --quiet -- 'DRY-RUN: fork org-ai-assisted/helper-scripts -> assisted-by-ai/helper-scripts' <<< "$out"; then
-  printf 'FAIL: expected fork plan for helper-scripts\n%s\n' "$out" >&2
+  printf '%s\n' 'FAIL: expected fork plan for helper-scripts' "$out" >&2
   exit 1
 fi
 if grep --quiet -- 'DRY-RUN: fork org-ai-assisted/derivative-maker' <<< "$out"; then
-  printf 'FAIL: derivative-maker already exists, should not be re-forked\n%s\n' "$out" >&2
+  printf '%s\n' \
+    'FAIL: derivative-maker already exists, should not be re-forked' "$out" >&2
   exit 1
 fi
 if grep --quiet -- 'fork org-ai-assisted/old-archived\|fork org-ai-assisted/some-fork\|fork org-ai-assisted/private-thing' <<< "$out"; then
-  printf 'FAIL: filtered repos appeared in fork plan\n%s\n' "$out" >&2
+  printf '%s\n' 'FAIL: filtered repos appeared in fork plan' "$out" >&2
   exit 1
 fi
 

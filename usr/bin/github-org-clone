@@ -19,6 +19,13 @@ shopt -s shift_verbose
 # shellcheck source=../libexec/developer-meta-files/github-org-lib.bsh
 source /usr/libexec/developer-meta-files/github-org-lib.bsh
 
+## Sanity-check the system 'wc' binary before using it. wc can core
+## dump on some systems (rspamd issue #5137); helper-scripts provides
+## a one-liner test that prints a clear diagnostic and exits non-zero
+## if wc is broken, so we never silently produce an empty count.
+# shellcheck source=/dev/null
+source /usr/libexec/helper-scripts/wc-test.sh
+
 include_private=0
 include_archived=0
 include_forks=0
@@ -78,7 +85,7 @@ while [ "$#" -gt 0 ]; do
     -v|--verbose) verbose=1; shift ;;
     -h|--help) show_help; exit 0 ;;
     --) shift; break ;;
-    -*) printf 'unknown option: %s\n' "$1" >&2; exit 64 ;;
+    -*) printf '%s\n' "unknown option: $1" >&2; exit 64 ;;
     *)  break ;;
   esac
 done
@@ -94,10 +101,11 @@ dest_dir="${2:-.}"
 ghorg_require_deps
 
 repo_url() {
-  local repo="$1"
+  local repo
+  repo="$1"
   case "$url_scheme" in
-    ssh)   printf 'git@github.com:%s/%s.git' "$source_org" "$repo" ;;
-    https) printf 'https://github.com/%s/%s.git' "$source_org" "$repo" ;;
+    ssh)   printf '%s' "git@github.com:${source_org}/${repo}.git" ;;
+    https) printf '%s' "https://github.com/${source_org}/${repo}.git" ;;
   esac
 }
 
@@ -123,16 +131,16 @@ clone_or_update_one() {
     existing_url="$(git -C "$repo_dir" remote get-url origin 2>/dev/null || true)"
     if [ -n "$existing_url" ] && [ "$existing_url" != "$url" ]; then
       safe_existing_url="$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$existing_url")"
-      printf 'warn: %s: origin is %s, expected %s; skipping (name collision?)\n' \
-        "$repo_dir" "$safe_existing_url" "$url" >&2
+      printf '%s\n' \
+        "warn: $repo_dir: origin is $safe_existing_url, expected $url; skipping (name collision?)" >&2
       return 0
     fi
 
     if [ "$dry_run" = '1' ]; then
-      printf 'DRY-RUN: update %s\n' "$repo_dir"
+      printf '%s\n' "DRY-RUN: update $repo_dir"
       return 0
     fi
-    [ "$verbose" = '1' ] && printf 'update: %s\n' "$repo_dir"
+    [ "$verbose" = '1' ] && printf '%s\n' "update: $repo_dir"
     ## --ff-only refuses anything that isn't a clean fast-forward; safer
     ## than `pull` for unattended runs where divergence would otherwise
     ## attempt a merge. `--` separates options from positional args
@@ -144,19 +152,19 @@ clone_or_update_one() {
       ## current branch - immune to tag/branch name collisions.
       if ! git -C "$repo_dir" merge --ff-only "@{u}" 2>/dev/null; then
         safe_branch="$(ghorg_safe_print "$GHORG_MAX_REPO_NAME_LEN" "$current_branch")"
-        printf 'warn: %s: %s not fast-forwardable, skipping merge\n' \
-          "$repo_dir" "$safe_branch" >&2
+        printf '%s\n' \
+          "warn: $repo_dir: $safe_branch not fast-forwardable, skipping merge" >&2
       fi
     fi
   elif [ -e "$repo_dir" ]; then
-    printf 'warn: %s exists and is not a git checkout, skipping\n' "$repo_dir" >&2
+    printf '%s\n' "warn: $repo_dir exists and is not a git checkout, skipping" >&2
     return 0
   else
     if [ "$dry_run" = '1' ]; then
-      printf 'DRY-RUN: clone %s -> %s\n' "$url" "$repo_dir"
+      printf '%s\n' "DRY-RUN: clone $url -> $repo_dir"
       return 0
     fi
-    [ "$verbose" = '1' ] && printf 'clone: %s\n' "$url"
+    [ "$verbose" = '1' ] && printf '%s\n' "clone: $url"
     clone_args=( clone )
     [ "$shallow" = '1' ] && clone_args+=( --depth=1 )
     ## `--` ensures a hostile-looking URL or repo_dir starting with
@@ -177,12 +185,12 @@ main() {
     | sort --unique)"
 
   if [ -z "$repos" ]; then
-    printf 'no repos matched.\n' >&2
+    printf '%s\n' 'no repos matched.' >&2
     return 0
   fi
 
-  repo_count="$(printf '%s\n' "$repos" | wc -l)"
-  printf '%s repos to process under %s\n' "$repo_count" "$dest_dir"
+  repo_count="$(printf '%s\n' "$repos" | wc --lines)"
+  printf '%s\n' "$repo_count repos to process under $dest_dir"
 
   ## Bounded parallelism: keep at most $jobs background jobs alive.
   active=0

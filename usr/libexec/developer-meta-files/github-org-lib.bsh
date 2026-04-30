@@ -58,39 +58,39 @@ GHORG_API="${GHORG_API:-https://api.github.com}"
 ## path (return, errexit, fall-through), so an enclosing `set -x`
 ## cannot leak the secret regardless of how this function exits.
 ghorg_token() {
+  local token_file mode
   local -
   set +x
   if [ -n "${GITHUB_TOKEN:-}" ]; then
     printf '%s' "$GITHUB_TOKEN"
     return 0
   fi
-  local token_file="${GHORG_TOKEN_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/github-token}"
+  token_file="${GHORG_TOKEN_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/github-token}"
   if [ -L "$token_file" ]; then
-    printf 'error: %s is a symlink; refusing to read token through it\n' \
-      "$token_file" >&2
+    printf '%s\n' \
+      "error: $token_file is a symlink; refusing to read token through it" >&2
     return 1
   fi
   if [ ! -e "$token_file" ]; then
-    printf 'error: no GitHub token. Set GITHUB_TOKEN or write one line to %s (chmod 600).\n' \
-      "$token_file" >&2
+    printf '%s\n' \
+      "error: no GitHub token. Set GITHUB_TOKEN or write one line to $token_file (chmod 600)." >&2
     return 1
   fi
   if [ ! -f "$token_file" ]; then
-    printf 'error: %s is not a regular file\n' "$token_file" >&2
+    printf '%s\n' "error: $token_file is not a regular file" >&2
     return 1
   fi
   if [ ! -r "$token_file" ]; then
-    printf 'error: %s is not readable\n' "$token_file" >&2
+    printf '%s\n' "error: $token_file is not readable" >&2
     return 1
   fi
   ## Reject a world-readable / group-readable token file outright;
   ## refusing it is safer than silently using a leaked secret.
-  local mode
   mode="$(stat -c '%a' -- "$token_file" 2>/dev/null \
     || stat -f '%Lp' -- "$token_file" 2>/dev/null \
-    || printf '600')"
+    || printf '%s' '600')"
   if [ "$mode" != '600' ] && [ "$mode" != '400' ]; then
-    printf 'error: %s permissions are %s, expected 600 or 400\n' "$token_file" "$mode" >&2
+    printf '%s\n' "error: $token_file permissions are $mode, expected 600 or 400" >&2
     return 1
   fi
   head --lines=1 -- "$token_file" | tr -d '\r\n'
@@ -105,7 +105,7 @@ ghorg_require_deps() {
   local cmd
   for cmd in curl jq sanitize-string; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
-      printf 'error: required command not found: %s\n' "$cmd" >&2
+      printf '%s\n' "error: required command not found: $cmd" >&2
       return 1
     fi
   done
@@ -130,8 +130,9 @@ GHORG_MAX_DISPLAY_LEN=256
 ##
 ## Args: $1 = max length (integer or "nolimit"), $2 = string
 ghorg_safe_print() {
-  local max="${1:-$GHORG_MAX_DISPLAY_LEN}"
-  local s="${2:-}"
+  local max s
+  max="${1:-$GHORG_MAX_DISPLAY_LEN}"
+  s="${2:-}"
   sanitize-string -- "$max" "$s"
 }
 
@@ -171,33 +172,30 @@ ghorg_validate_name() {
   esac
 
   if [ -z "$name" ]; then
-    printf 'reject: empty %s name\n' "$kind" >&2
+    printf '%s\n' "reject: empty $kind name" >&2
     return 1
   fi
   safe_name="$(ghorg_safe_print "$max_len" "$name")"
   if [ "${#name}" -gt "$max_len" ]; then
-    printf 'reject: %s name exceeds %s chars: %s\n' \
-      "$kind" "$max_len" "$safe_name" >&2
+    printf '%s\n' "reject: $kind name exceeds $max_len chars: $safe_name" >&2
     return 1
   fi
   if ! [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]]; then
-    printf 'reject: %s name has disallowed chars: %s\n' \
-      "$kind" "$safe_name" >&2
+    printf '%s\n' "reject: $kind name has disallowed chars: $safe_name" >&2
     return 1
   fi
   case "$name" in
     '.'|'..'|'.git')
-      printf 'reject: reserved %s name: %s\n' "$kind" "$safe_name" >&2
+      printf '%s\n' "reject: reserved $kind name: $safe_name" >&2
       return 1
       ;;
     '-'*)
-      printf 'reject: %s name starts with dash (arg injection): %s\n' \
-        "$kind" "$safe_name" >&2
+      printf '%s\n' \
+        "reject: $kind name starts with dash (arg injection): $safe_name" >&2
       return 1
       ;;
     *'..'*)
-      printf 'reject: %s name contains "..": %s\n' \
-        "$kind" "$safe_name" >&2
+      printf '%s\n' "reject: $kind name contains \"..\": $safe_name" >&2
       return 1
       ;;
   esac
@@ -246,16 +244,16 @@ ghorg_parse_rate_limit_wait() {
   ## under strict shell options.
   retry_after="$(grep --ignore-case -- '^retry-after:' "$hdr_file" 2>/dev/null \
     | head --lines=1 \
-    | sed 's/^[^:]*:[[:space:]]*//' \
-    | tr -d '[:cntrl:]' || true)"
+    | sed -- 's/^[^:]*:[[:space:]]*//' \
+    | tr -d -- '[:cntrl:]' || true)"
   if [[ "$retry_after" =~ ^[0-9]+$ ]]; then
     printf '%s' "$retry_after"
     return 0
   fi
   reset="$(grep --ignore-case -- '^x-ratelimit-reset:' "$hdr_file" 2>/dev/null \
     | head --lines=1 \
-    | sed 's/^[^:]*:[[:space:]]*//' \
-    | tr -d '[:cntrl:]' || true)"
+    | sed -- 's/^[^:]*:[[:space:]]*//' \
+    | tr -d -- '[:cntrl:]' || true)"
   if [[ "$reset" =~ ^[0-9]+$ ]]; then
     local now wait
     now="$(date -u +%s)"
@@ -296,9 +294,9 @@ ghorg_mock_dispatch() {
     cat -- "$fixture"
     return 0
   fi
-  printf '{"mock":"missing","method":"%s","path":"%s","key":"%s"}\n' \
-    "$method" "$clean_path" "$key"
-  printf 'HTTP_STATUS:599\n'
+  printf '%s\n' \
+    "{\"mock\":\"missing\",\"method\":\"$method\",\"path\":\"$clean_path\",\"key\":\"$key\"}"
+  printf '%s\n' 'HTTP_STATUS:599'
 }
 
 ## Authenticated GitHub REST call with retry on transient failures.
@@ -328,11 +326,15 @@ ghorg_mock_dispatch() {
 ## Auth: token from env or token file. Without a token, the request
 ## goes anonymously (works for public reads at GitHub's 60/hr rate
 ## limit per IP).
-## Trap target for ghorg_api's per-call header tempfile. Uses the
-## hdr_file variable from the enclosing scope so the trap signature
-## stays a bare function name rather than an inline command string.
+## Trap target for ghorg_api's per-call header tempfile. Reads the
+## hdr_file local from the calling function via bash dynamic scoping
+## (RETURN trap runs while the caller's scope is still alive). The
+## trap is registered AFTER hdr_file is assigned by mktemp, so it is
+## already set under `set -o nounset` by the time the trap can fire;
+## no `${hdr_file:-}` default is needed (and using one would mask a
+## real init-order bug if the trap registration ever moved earlier).
 ghorg_api_cleanup_hdr_file() {
-  rm -f -- "$hdr_file"
+  safe-rm --force -- "$hdr_file"
 }
 
 ghorg_api() {
@@ -385,30 +387,30 @@ ghorg_api() {
   while true ; do
     true > "$hdr_file"
     if [ -n "$token" ]; then
-      result="$(printf 'header = "Authorization: Bearer %s"\n' "$token" \
+      result="$(printf '%s\n' "header = \"Authorization: Bearer $token\"" \
         | curl "${args[@]}" --config - "${GHORG_API}${path}" || true)"
     else
       result="$(curl "${args[@]}" "${GHORG_API}${path}" || true)"
     fi
-    status="$(printf '%s\n' "$result" | tail --lines=1 | sed 's/^HTTP_STATUS://')"
+    status="$(printf '%s\n' "$result" | tail --lines=1 | sed -- 's/^HTTP_STATUS://')"
 
     ## Decide whether this status warrants a retry.
     case "$status" in
       429)
-        true ## always retry
+        true "INFO: ghorg_api: HTTP 429 (Too Many Requests) - will retry"
         ;;
       403)
         ## 403 covers both rate-limit-exceeded (retry) and real
         ## permission errors (don't retry). Distinguish by body.
-        body_text="$(printf '%s\n' "$result" | sed '$d')"
+        body_text="$(printf '%s\n' "$result" | sed -- '$d')"
         if printf '%s' "$body_text" | grep --quiet --ignore-case -- 'rate limit\|secondary rate'; then
-          true ## retry
+          true "INFO: ghorg_api: HTTP 403 rate-limit body - will retry"
         else
           break
         fi
         ;;
       500|502|503|504)
-        true ## transient server error, retry
+        true "INFO: ghorg_api: HTTP $status (transient server error) - will retry"
         ;;
       *)
         break
@@ -416,8 +418,8 @@ ghorg_api() {
     esac
 
     if [ "$attempt" -ge "$max" ]; then
-      printf 'warn: ghorg_api: gave up after %s retries on HTTP %s for %s %s\n' \
-        "$max" "$status" "$method" "$path" >&2
+      printf '%s\n' \
+        "warn: ghorg_api: gave up after $max retries on HTTP $status for $method $path" >&2
       break
     fi
 
@@ -426,12 +428,12 @@ ghorg_api() {
       wait="$(ghorg_compute_backoff_seconds "$attempt")"
     fi
     if [ "$wait" -gt "$GHORG_MAX_BACKOFF_SECONDS" ]; then
-      printf 'warn: ghorg_api: server requested %ss wait, exceeds GHORG_MAX_BACKOFF_SECONDS=%s; aborting retry\n' \
-        "$wait" "$GHORG_MAX_BACKOFF_SECONDS" >&2
+      printf '%s\n' \
+        "warn: ghorg_api: server requested ${wait}s wait, exceeds GHORG_MAX_BACKOFF_SECONDS=${GHORG_MAX_BACKOFF_SECONDS}; aborting retry" >&2
       break
     fi
-    printf 'info: ghorg_api: HTTP %s for %s %s; sleeping %ss before retry %s/%s\n' \
-      "$status" "$method" "$path" "$wait" "$(( attempt + 1 ))" "$max" >&2
+    printf '%s\n' \
+      "info: ghorg_api: HTTP $status for $method $path; sleeping ${wait}s before retry $(( attempt + 1 ))/${max}" >&2
     sleep -- "$wait"
     attempt=$(( attempt + 1 ))
   done
@@ -439,8 +441,8 @@ ghorg_api() {
   printf '%s\n' "$result"
 }
 
-ghorg_status_of() { printf '%s\n' "$1" | tail --lines=1 | sed 's/^HTTP_STATUS://'; }
-ghorg_body_of()   { printf '%s\n' "$1" | sed '$d'; }
+ghorg_status_of() { printf '%s\n' "$1" | tail --lines=1 | sed -- 's/^HTTP_STATUS://'; }
+ghorg_body_of()   { printf '%s\n' "$1" | sed -- '$d'; }
 
 ## Probes whether $1 is a User or an Organization on GitHub. Result is
 ## cached in ghorg_account_type_cache so repeated lookups don't burn
@@ -463,11 +465,10 @@ ghorg_account_type() {
   body="$(ghorg_body_of "$result")"
   safe_owner="$(ghorg_safe_print "$GHORG_MAX_USER_LOGIN_LEN" "$owner")"
   if [ "$status" != '200' ]; then
-    printf 'error: account type lookup for %s: HTTP %s\n' \
-      "$safe_owner" "$status" >&2
+    printf '%s\n' "error: account type lookup for $safe_owner: HTTP $status" >&2
     return 1
   fi
-  type="$(printf '%s' "$body" | jq -r '.type')"
+  type="$(printf '%s' "$body" | jq -r -- '.type')"
   ## Strict allowlist - even though we control the case below, an
   ## unexpected value should trip a clear rejection rather than reach
   ## any downstream comparison.
@@ -475,8 +476,7 @@ ghorg_account_type() {
     User|Organization) ;;
     *)
       safe_type="$(ghorg_safe_print 32 "$type")"
-      printf 'error: unexpected account type for %s: %s\n' \
-        "$safe_owner" "$safe_type" >&2
+      printf '%s\n' "error: unexpected account type for $safe_owner: $safe_type" >&2
       return 1
       ;;
   esac
@@ -521,8 +521,8 @@ ghorg_list_repos() {
       if [ "$inc_private" = '1' ]; then
         auth_user="$(ghorg_authenticated_user)" || return 1
         if [ "$owner" != "$auth_user" ]; then
-          printf 'error: cannot list private repos of user %s; auth token belongs to %s\n' \
-            "$owner" "$auth_user" >&2
+          printf '%s\n' \
+            "error: cannot list private repos of user $owner; auth token belongs to $auth_user" >&2
           return 1
         fi
         api_base="/user/repos?per_page=100&affiliation=owner"
@@ -555,10 +555,10 @@ ghorg_list_repos() {
     status="$(ghorg_status_of "$result")"
     body="$(ghorg_body_of "$result")"
     if [ "$status" != '200' ]; then
-      printf 'error: list repos for %s: HTTP %s\n' "$safe_owner" "$status" >&2
+      printf '%s\n' "error: list repos for $safe_owner: HTTP $status" >&2
       return 1
     fi
-    count="$(printf '%s' "$body" | jq 'length')"
+    count="$(printf '%s' "$body" | jq -- 'length')"
     [ "$count" = '0' ] && break
     ## Validate every name returned by the API before passing it on.
     ## A hostile or impersonated API endpoint could otherwise smuggle
@@ -569,7 +569,7 @@ ghorg_list_repos() {
       if ghorg_validate_name "$name" repo; then
         printf '%s\n' "$name"
       fi
-    done < <(printf '%s' "$body" | jq -r "$jq_filter")
+    done < <(printf '%s' "$body" | jq -r -- "$jq_filter")
     [ "$count" -lt 100 ] && break
     page=$(( page + 1 ))
   done
@@ -626,8 +626,7 @@ ghorg_repo_lookup() {
     *)
       safe_owner="$(ghorg_safe_print "$GHORG_MAX_USER_LOGIN_LEN" "$owner")"
       safe_repo="$(ghorg_safe_print "$GHORG_MAX_REPO_NAME_LEN" "$repo")"
-      printf 'error: repo lookup %s/%s: HTTP %s\n' \
-        "$safe_owner" "$safe_repo" "$status" >&2
+      printf '%s\n' "error: repo lookup ${safe_owner}/${safe_repo}: HTTP $status" >&2
       return 2
       ;;
   esac
@@ -655,12 +654,11 @@ ghorg_repo_parent() {
   if [ "$status" != '200' ]; then
     safe_owner="$(ghorg_safe_print "$GHORG_MAX_USER_LOGIN_LEN" "$owner")"
     safe_repo="$(ghorg_safe_print "$GHORG_MAX_REPO_NAME_LEN" "$repo")"
-    printf 'warn: parent lookup for %s/%s: HTTP %s\n' \
-      "$safe_owner" "$safe_repo" "$status" >&2
+    printf '%s\n' "warn: parent lookup for ${safe_owner}/${safe_repo}: HTTP $status" >&2
     return 1
   fi
   body="$(ghorg_body_of "$result")"
-  parent="$(printf '%s' "$body" | jq -r '.parent.full_name // empty')"
+  parent="$(printf '%s' "$body" | jq -r -- '.parent.full_name // empty')"
   ## .full_name is "owner/repo"; both halves must validate cleanly.
   ## Splitting in bash to avoid trusting the API-supplied "/".
   if [ -n "$parent" ]; then
@@ -690,13 +688,13 @@ ghorg_authenticated_user() {
   result="$(ghorg_api GET "/user")" || return 1
   status="$(ghorg_status_of "$result")"
   if [ "$status" != '200' ]; then
-    printf 'error: cannot read authenticated user: HTTP %s\n' "$status" >&2
+    printf '%s\n' "error: cannot read authenticated user: HTTP $status" >&2
     return 1
   fi
   body="$(ghorg_body_of "$result")"
-  login="$(printf '%s' "$body" | jq -r '.login')"
+  login="$(printf '%s' "$body" | jq -r -- '.login')"
   if [ -z "$login" ] || [ "$login" = 'null' ]; then
-    printf 'error: authenticated user response missing .login\n' >&2
+    printf '%s\n' 'error: authenticated user response missing .login' >&2
     return 1
   fi
   ## Validate before caching - the login flows into equality checks

@@ -62,7 +62,7 @@ jobs:
           apt-get update
           apt-get install --yes --no-install-recommends -- \
             ca-certificates curl jq git sudo build-essential dctrl-tools \
-            python3
+            python3 safe-rm
 
       - name: Checkout developer-meta-files
         uses: actions/checkout@v6

@@ -33,13 +33,15 @@ shopt -s inherit_errexit
 shopt -s shift_verbose
 
 if [ "${CI:-}" != "true" ]; then
-   printf 'error: this script must run with CI=true (GitHub Actions or equivalent).\n' >&2
+   printf '%s\n' \
+      'error: this script must run with CI=true (GitHub Actions or equivalent).' >&2
    exit 1
 fi
 
 if ! command -v sanitize-string >/dev/null 2>&1; then
-   printf 'error: sanitize-string not found on PATH.\n' >&2
-   printf '       Install helper-scripts (see ci/install-helper-scripts.sh).\n' >&2
+   printf '%s\n' \
+      'error: sanitize-string not found on PATH.' \
+      '       Install helper-scripts (see ci/install-helper-scripts.sh).' >&2
    exit 1
 fi
 
@@ -56,7 +58,7 @@ fail=0
 for valid_name in derivative-maker helper-scripts foo_bar foo.bar foo-bar1 a \
                   .github .gitignore .hidden; do
    if ! ghorg_validate_name "$valid_name" repo 2>/dev/null; then
-      printf 'FAIL: rejected good name: %s\n' "$valid_name" >&2
+      printf '%s\n' "FAIL: rejected good name: $valid_name" >&2
       fail=1
    fi
 done
@@ -68,7 +70,8 @@ bad_names=( '' '.git' '..' '.' '-flag' '../etc'
             'foo..bar' 'foo/bar' 'foo bar' )
 for bad_name in "${bad_names[@]}"; do
    if ghorg_validate_name "$bad_name" repo 2>/dev/null; then
-      printf 'FAIL: accepted bad pattern: %q\n' "$bad_name" >&2
+      bad_name_q="$(printf '%q' "$bad_name")"
+      printf '%s\n' "FAIL: accepted bad pattern: $bad_name_q" >&2
       fail=1
    fi
 done
@@ -76,12 +79,12 @@ done
 ## Length cap: 100 OK, 101 reject.
 ok_100chars="$(printf 'a%.0s' {1..100})"
 if ! ghorg_validate_name "$ok_100chars" repo 2>/dev/null; then
-   printf 'FAIL: rejected 100-char name\n' >&2
+   printf '%s\n' 'FAIL: rejected 100-char name' >&2
    fail=1
 fi
 overlong_101chars="$(printf 'a%.0s' {1..101})"
 if ghorg_validate_name "$overlong_101chars" repo 2>/dev/null; then
-   printf 'FAIL: accepted 101-char name (over cap)\n' >&2
+   printf '%s\n' 'FAIL: accepted 101-char name (over cap)' >&2
    fail=1
 fi
 

@@ -18,7 +18,8 @@ shopt -s inherit_errexit
 shopt -s shift_verbose
 
 if [ "${CI:-}" != "true" ]; then
-   printf 'error: this script must run with CI=true (GitHub Actions or equivalent).\n' >&2
+   printf '%s\n' \
+      'error: this script must run with CI=true (GitHub Actions or equivalent).' >&2
    exit 1
 fi
 
@@ -49,7 +50,7 @@ required=(
 )
 for needle in "${required[@]}"; do
    if ! grep --quiet --fixed-strings -- "$needle" <<< "$out"; then
-      printf 'FAIL: missing expected fragment: %s\n' "$needle" >&2
+      printf '%s\n' "FAIL: missing expected fragment: $needle" >&2
       fail=1
    fi
 done
@@ -57,7 +58,8 @@ done
 ## --dry-run must not emit a real "ok:" or "warn:" prefix that comes
 ## from api_call's success/failure path - those mean a real PATCH ran.
 if grep --quiet --extended-regexp -- '^ok:|^warn:' <<< "$out"; then
-   printf 'FAIL: --dry-run unexpectedly printed ok:/warn: real-API output:\n' >&2
+   printf '%s\n' \
+      'FAIL: --dry-run unexpectedly printed ok:/warn: real-API output:' >&2
    grep --extended-regexp -- '^ok:|^warn:' <<< "$out" | head -5 >&2
    fail=1
 fi
