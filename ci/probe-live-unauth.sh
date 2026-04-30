@@ -69,7 +69,14 @@ done
 ##  - dry-run output mentions at least one repo
 unset GITHUB_TOKEN
 out_dir="$(mktemp --directory)"
-trap 'rm -rf -- "$out_dir"' EXIT
+
+## Trap target for the per-run scratch dir. Standalone function
+## (not an inline command string) so the trap is auditable as a
+## named callable rather than a quoted snippet.
+probe_live_unauth_cleanup_out_dir() {
+   rm -rf -- "$out_dir"
+}
+trap probe_live_unauth_cleanup_out_dir EXIT
 
 printf '\n=== github-org-clone --dry-run %s ===\n' "$target_org"
 out="$(github-org-clone --dry-run "$target_org" "$out_dir/clone" 2>&1)"

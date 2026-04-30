@@ -112,16 +112,16 @@ remote_url() {
 }
 
 push_one() {
-  local repo_dir="$1"
-  local repo
+  local repo_dir repo url branch resolved_head safe_repo_dir
+  repo_dir="$1"
   repo="$(basename -- "$repo_dir")"
 
   ## Validate the directory-derived name before using it as a URL or
   ## API parameter. Same allowlist rules as for API-supplied names so
   ## a hostile filesystem can't smuggle bad names either.
   if ! ghorg_validate_name "$repo" repo; then
-    printf 'warn: skipping %s (invalid name)\n' \
-      "$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$repo_dir")" >&2
+    safe_repo_dir="$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$repo_dir")"
+    printf 'warn: skipping %s (invalid name)\n' "$safe_repo_dir" >&2
     return 0
   fi
 
@@ -153,7 +153,6 @@ push_one() {
       ;;
   esac
 
-  local url
   url="$(remote_url "$repo")"
 
   if [ "$dry_run" = '1' ]; then
@@ -170,7 +169,6 @@ push_one() {
     git -C "$repo_dir" remote add "$remote_name" "$url"
   fi
 
-  local branch resolved_head
   for branch in $branches; do
     if [ "$branch" = 'HEAD' ]; then
       ## Resolve HEAD to a fully qualified ref locally first, so the
@@ -213,34 +211,53 @@ push_one() {
 }
 
 main() {
+  local candidate_count active repo_dir base_name candidate_dir
+  local -a candidate_dirs
   if [ ! -d "$source_dir" ]; then
     printf 'error: source dir does not exist: %s\n' "$source_dir" >&2
     exit 1
   fi
 
   ## Discover candidate clones: every immediate subdir that has a .git.
-  local candidates
-  candidates="$(find "$source_dir" -mindepth 1 -maxdepth 1 -type d \
-    -exec test -e '{}/.git' \; -print | sort -u)"
+  ## NUL-delimited so directory names containing newlines or other
+  ## odd bytes survive intact (find -print0 + read -d ''). Subdirs
+  ## without a .git are filtered by the test on each entry.
+  candidate_dirs=()
+  while IFS= read -r -d '' candidate_dir; do
+    [ -e "${candidate_dir}/.git" ] || continue
+    candidate_dirs+=( "$candidate_dir" )
+  done < <(find "$source_dir" -mindepth 1 -maxdepth 1 -type d -print0 \
+    | sort --zero-terminated --unique)
 
   if [ -n "$include_re" ] || [ -n "$exclude_re" ]; then
-    candidates="$(printf '%s\n' "$candidates" | while IFS= read -r d; do
-      [ -z "$d" ] && continue
-      printf '%s\n' "$(basename -- "$d")"
-    done | ghorg_filter_names "$include_re" "$exclude_re" | while IFS= read -r name; do
-      printf '%s/%s\n' "$source_dir" "$name"
-    done)"
+    ## Filter by basename, then re-prefix with source_dir.
+    local -a filtered
+    local kept_names cand_basename
+    local names_in=''
+    for candidate_dir in "${candidate_dirs[@]}"; do
+      cand_basename="$(basename -- "$candidate_dir")"
+      names_in+="${cand_basename}"$'\n'
+    done
+    kept_names="$(printf '%s' "$names_in" \
+      | ghorg_filter_names "$include_re" "$exclude_re")"
+    filtered=()
+    while IFS= read -r base_name; do
+      [ -z "$base_name" ] && continue
+      filtered+=( "${source_dir}/${base_name}" )
+    done <<< "$kept_names"
+    candidate_dirs=( "${filtered[@]}" )
   fi
 
-  if [ -z "$candidates" ]; then
+  candidate_count="${#candidate_dirs[@]}"
+  if [ "$candidate_count" -eq 0 ]; then
     printf 'no git checkouts found under %s\n' "$source_dir" >&2
     return 0
   fi
 
-  printf '%s repos to process\n' "$(printf '%s\n' "$candidates" | wc -l)"
+  printf '%s repos to process\n' "$candidate_count"
 
-  local active=0
-  while IFS= read -r repo_dir; do
+  active=0
+  for repo_dir in "${candidate_dirs[@]}"; do
     [ -z "$repo_dir" ] && continue
     push_one "$repo_dir" &
     active=$(( active + 1 ))

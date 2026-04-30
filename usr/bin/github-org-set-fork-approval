@@ -78,7 +78,8 @@ policy="${2:-all_external_contributors}"
 case "$policy" in
   all_external_contributors|first_time_contributors|first_time_contributors_new_to_github) ;;
   *)
-    printf 'invalid policy: %s\n' "$(ghorg_safe_print 64 "$policy")" >&2
+    safe_policy="$(ghorg_safe_print 64 "$policy")"
+    printf 'invalid policy: %s\n' "$safe_policy" >&2
     printf 'valid: all_external_contributors, first_time_contributors, first_time_contributors_new_to_github\n' >&2
     exit 64
     ;;
@@ -92,21 +93,22 @@ ghorg_require_deps
 ghorg_validate_name "$org" user || exit 1
 account_type="$(ghorg_account_type "$org")"
 if [ "$account_type" != 'Organization' ]; then
+  safe_org="$(ghorg_safe_print 64 "$org")"
   printf 'error: %s is a %s, not an Organization; this setting is org-only\n' \
-    "$(ghorg_safe_print 64 "$org")" "$account_type" >&2
+    "$safe_org" "$account_type" >&2
   exit 1
 fi
 
 api_path="/orgs/${org}/actions/permissions/fork-pr-contributor-approval"
 
 current_policy() {
-  local result status body
+  local result status body safe_body
   result="$(ghorg_api GET "$api_path")" || return 1
   status="$(ghorg_status_of "$result")"
   body="$(ghorg_body_of "$result")"
   if [ "$status" != '200' ]; then
-    printf 'error: GET %s: HTTP %s\n%s\n' \
-      "$api_path" "$status" "$(ghorg_safe_print 512 "$body")" >&2
+    safe_body="$(ghorg_safe_print 512 "$body")"
+    printf 'error: GET %s: HTTP %s\n%s\n' "$api_path" "$status" "$safe_body" >&2
     return 1
   fi
   printf '%s' "$body" | jq -r '.approval_policy // "(unset)"'
@@ -114,8 +116,9 @@ current_policy() {
 
 case "$mode" in
   get)
+    cur="$(current_policy)"
     printf 'org: %s\n' "$org"
-    printf 'current approval_policy: %s\n' "$(current_policy)"
+    printf 'current approval_policy: %s\n' "$cur"
     ;;
   set)
     cur="$(current_policy)"
@@ -136,13 +139,15 @@ case "$mode" in
     case "$status" in
       204|200)
          printf 'updated approval_policy=%s on %s\n' "$policy" "$org"
-         [ "$verbose" = '1' ] && printf 'response body: %s\n' \
-           "$(ghorg_safe_print 512 "$(ghorg_body_of "$result")")"
+         if [ "$verbose" = '1' ]; then
+            response_body="$(ghorg_safe_print 512 "$(ghorg_body_of "$result")")"
+            printf 'response body: %s\n' "$response_body"
+         fi
          ;;
       *)
+         response_body="$(ghorg_safe_print 512 "$(ghorg_body_of "$result")")"
          printf 'error: PUT %s: HTTP %s\n%s\n' \
-           "$api_path" "$status" \
-           "$(ghorg_safe_print 512 "$(ghorg_body_of "$result")")" >&2
+           "$api_path" "$status" "$response_body" >&2
          exit 1
          ;;
     esac

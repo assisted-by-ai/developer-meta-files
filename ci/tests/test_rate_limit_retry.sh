@@ -41,7 +41,14 @@ expect 'backoff[3]' '240'  "$(ghorg_compute_backoff_seconds 3)"
 
 ## Retry-After header takes precedence.
 hdr="$(mktemp)"
-trap 'rm -f -- "$hdr"' EXIT
+
+## Trap target for the per-run header tempfile. Standalone function
+## (not an inline command string) so the trap is auditable.
+test_rate_limit_retry_cleanup_hdr() {
+   # shellcheck disable=SC2317  ## invoked indirectly via trap
+   rm -f -- "$hdr"
+}
+trap test_rate_limit_retry_cleanup_hdr EXIT
 printf 'HTTP/2 429\r\nRetry-After: 17\r\nX-RateLimit-Reset: 99999999999\r\n\r\n' > "$hdr"
 expect 'parse Retry-After' '17' "$(ghorg_parse_rate_limit_wait "$hdr")"
 

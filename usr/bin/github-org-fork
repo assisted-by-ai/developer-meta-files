@@ -119,20 +119,21 @@ ghorg_require_deps
 ## target_owner up front and refuse otherwise - the alternative is
 ## creating forks in the wrong account while logs claim otherwise.
 fork_one() {
-  local repo="$1"
+  local repo target_type body auth_user result status
+  local safe_target safe_auth
+  repo="$1"
   ghorg_validate_name "$repo" repo || return 1
-  local target_type body
   target_type="$(ghorg_account_type "$target_owner")" || return 1
   if [ "$target_type" = 'Organization' ]; then
     body="$(jq -n --arg org "$target_owner" \
       '{organization: $org, default_branch_only: false}')"
   else
-    local auth_user
     auth_user="$(ghorg_authenticated_user)" || return 1
     if [ "$auth_user" != "$target_owner" ]; then
+      safe_target="$(ghorg_safe_print "$GHORG_MAX_USER_LOGIN_LEN" "$target_owner")"
+      safe_auth="$(ghorg_safe_print "$GHORG_MAX_USER_LOGIN_LEN" "$auth_user")"
       printf 'error: target user %s does not match auth user %s; refusing to fork\n' \
-        "$(ghorg_safe_print "$GHORG_MAX_USER_LOGIN_LEN" "$target_owner")" \
-        "$(ghorg_safe_print "$GHORG_MAX_USER_LOGIN_LEN" "$auth_user")" >&2
+        "$safe_target" "$safe_auth" >&2
       return 1
     fi
     body="$(jq -n '{default_branch_only: false}')"
@@ -142,7 +143,6 @@ fork_one() {
       "$source_owner" "$repo" "$target_owner" "$repo"
     return 0
   fi
-  local result status
   result="$(ghorg_api POST "/repos/${source_owner}/${repo}/forks" "$body")"
   status="$(ghorg_status_of "$result")"
   case "$status" in
@@ -163,16 +163,16 @@ fork_one() {
 ## but don't fail - the operator sees the collision and decides what
 ## to do (rename, archive, or accept).
 check_collision() {
-  local repo="$1"
-  local parent expected
+  local repo parent expected safe_repo safe_parent safe_expected
+  repo="$1"
   parent="$(ghorg_repo_parent "$target_owner" "$repo")" || return 0
   expected="${source_owner}/${repo}"
   if [ -n "$parent" ] && [ "$parent" != "$expected" ]; then
+    safe_repo="$(ghorg_safe_print "$GHORG_MAX_REPO_NAME_LEN" "$repo")"
+    safe_parent="$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$parent")"
+    safe_expected="$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$expected")"
     printf 'warn: collision: %s/%s exists as fork of %s, expected %s\n' \
-      "$target_owner" \
-      "$(ghorg_safe_print "$GHORG_MAX_REPO_NAME_LEN" "$repo")" \
-      "$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$parent")" \
-      "$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$expected")" >&2
+      "$target_owner" "$safe_repo" "$safe_parent" "$safe_expected" >&2
   fi
 }
 
@@ -180,18 +180,18 @@ check_collision() {
 ## to a single target repo. Idempotent and skipped entirely when no
 ## flags were passed.
 configure_one() {
-  local repo="$1"
+  local repo patch enabled body result status
+  repo="$1"
 
   ## Repo settings PATCH only sent if at least one toggle was requested.
   if [ "$disable_issues$disable_wiki$disable_projects" != '000' ]; then
-    local patch='{}'
+    patch='{}'
     [ "$disable_issues"   = '1' ] && patch="$(printf '%s' "$patch" | jq '. + {has_issues: false}')"
     [ "$disable_wiki"     = '1' ] && patch="$(printf '%s' "$patch" | jq '. + {has_wiki: false}')"
     [ "$disable_projects" = '1' ] && patch="$(printf '%s' "$patch" | jq '. + {has_projects: false}')"
     if [ "$dry_run" = '1' ]; then
       printf 'DRY-RUN: PATCH %s/%s %s\n' "$target_owner" "$repo" "$patch"
     else
-      local result status
       result="$(ghorg_api PATCH "/repos/${target_owner}/${repo}" "$patch")"
       status="$(ghorg_status_of "$result")"
       [ "$status" != '200' ] && \
@@ -202,14 +202,11 @@ configure_one() {
   fi
 
   if [ "$actions_state" != 'leave' ]; then
-    local enabled
     [ "$actions_state" = 'enable' ] && enabled='true' || enabled='false'
-    local body
     body="$(jq -n --argjson e "$enabled" '{enabled: $e, allowed_actions: "all"}')"
     if [ "$dry_run" = '1' ]; then
       printf 'DRY-RUN: actions %s on %s/%s\n' "$actions_state" "$target_owner" "$repo"
     else
-      local result status
       result="$(ghorg_api PUT "/repos/${target_owner}/${repo}/actions/permissions" "$body")"
       status="$(ghorg_status_of "$result")"
       case "$status" in
@@ -222,14 +219,12 @@ configure_one() {
   fi
 
   if [ "$workflow_perms" != 'leave' ]; then
-    local body
     body="$(jq -n --arg p "$workflow_perms" \
       '{default_workflow_permissions: $p, can_approve_pull_request_reviews: false}')"
     if [ "$dry_run" = '1' ]; then
       printf 'DRY-RUN: workflow-perms %s on %s/%s\n' \
         "$workflow_perms" "$target_owner" "$repo"
     else
-      local result status
       result="$(ghorg_api PUT \
         "/repos/${target_owner}/${repo}/actions/permissions/workflow" "$body")"
       status="$(ghorg_status_of "$result")"
@@ -244,15 +239,14 @@ configure_one() {
 }
 
 main() {
+  local target_type auth_user source_repos target_repos missing to_configure repo
   printf 'source: %s -> target: %s\n' "$source_owner" "$target_owner"
 
   ## If the target is a User, GitHub will fork to the authenticated
   ## user regardless of target_owner. Verify equivalence up front and
   ## abort the whole run rather than discovering this per repo.
-  local target_type
   target_type="$(ghorg_account_type "$target_owner")"
   if [ "$target_type" = 'User' ]; then
-    local auth_user
     auth_user="$(ghorg_authenticated_user)"
     if [ "$auth_user" != "$target_owner" ]; then
       printf 'error: target user %s does not match auth user %s; aborting\n' \
@@ -261,14 +255,13 @@ main() {
     fi
   fi
 
-  local source_repos target_repos missing
   source_repos="$(ghorg_list_repos "$source_owner" \
     "$include_private" "$include_archived" "$include_forks" \
     | ghorg_filter_names "$include_re" "$exclude_re" \
-    | sort -u)"
+    | sort --unique)"
   ## Target side: do NOT exclude forks - target forks ARE the mirrors.
   target_repos="$(ghorg_list_repos "$target_owner" 1 1 1 \
-    | sort -u)"
+    | sort --unique)"
 
   if [ -z "$source_repos" ]; then
     printf 'no source repos matched.\n' >&2
@@ -292,11 +285,10 @@ main() {
   ## async; brand-new forks may not appear yet, but configure_one is
   ## idempotent on the next run).
   target_repos="$(ghorg_list_repos "$target_owner" 1 1 1 \
-    | sort -u)"
+    | sort --unique)"
 
   ## Configure only those target repos that exist for a same-named
   ## source repo - leaves unrelated target-side repos alone.
-  local to_configure
   to_configure="$(comm -12 \
     <(printf '%s\n' "$source_repos") \
     <(printf '%s\n' "$target_repos"))"

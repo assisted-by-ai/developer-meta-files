@@ -107,10 +107,12 @@ repo_url() {
 ## this point; we still re-validate defensively because nothing else
 ## stops a caller from invoking this function with arbitrary input.
 clone_or_update_one() {
-  local repo="$1"
+  local repo repo_dir url existing_url current_branch
+  local safe_existing_url safe_branch
+  local -a clone_args
+  repo="$1"
   ghorg_validate_name "$repo" repo || return 0
-  local repo_dir="${dest_dir}/${repo}"
-  local url existing_url
+  repo_dir="${dest_dir}/${repo}"
   url="$(repo_url "$repo")"
 
   if [ -d "${repo_dir}/.git" ]; then
@@ -120,10 +122,9 @@ clone_or_update_one() {
     ## fetch from the wrong upstream.
     existing_url="$(git -C "$repo_dir" remote get-url origin 2>/dev/null || true)"
     if [ -n "$existing_url" ] && [ "$existing_url" != "$url" ]; then
+      safe_existing_url="$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$existing_url")"
       printf 'warn: %s: origin is %s, expected %s; skipping (name collision?)\n' \
-        "$repo_dir" \
-        "$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$existing_url")" \
-        "$url" >&2
+        "$repo_dir" "$safe_existing_url" "$url" >&2
       return 0
     fi
 
@@ -137,15 +138,15 @@ clone_or_update_one() {
     ## attempt a merge. `--` separates options from positional args
     ## even though no operand is an option here - belt and braces.
     git -C "$repo_dir" fetch --prune --tags -- origin
-    local current_branch
     current_branch="$(git -C "$repo_dir" symbolic-ref --short HEAD 2>/dev/null || true)"
     if [ -n "$current_branch" ]; then
       ## @{u} is an unambiguous symbolic ref for the upstream of the
       ## current branch - immune to tag/branch name collisions.
-      git -C "$repo_dir" merge --ff-only "@{u}" 2>/dev/null || \
+      if ! git -C "$repo_dir" merge --ff-only "@{u}" 2>/dev/null; then
+        safe_branch="$(ghorg_safe_print "$GHORG_MAX_REPO_NAME_LEN" "$current_branch")"
         printf 'warn: %s: %s not fast-forwardable, skipping merge\n' \
-          "$repo_dir" \
-          "$(ghorg_safe_print "$GHORG_MAX_REPO_NAME_LEN" "$current_branch")" >&2
+          "$repo_dir" "$safe_branch" >&2
+      fi
     fi
   elif [ -e "$repo_dir" ]; then
     printf 'warn: %s exists and is not a git checkout, skipping\n' "$repo_dir" >&2
@@ -156,7 +157,7 @@ clone_or_update_one() {
       return 0
     fi
     [ "$verbose" = '1' ] && printf 'clone: %s\n' "$url"
-    local clone_args=( clone )
+    clone_args=( clone )
     [ "$shallow" = '1' ] && clone_args+=( --depth=1 )
     ## `--` ensures a hostile-looking URL or repo_dir starting with
     ## `-` (which validation already rejects upstream) cannot be
@@ -167,23 +168,24 @@ clone_or_update_one() {
 }
 
 main() {
+  local repos repo_count active repo
   mkdir -p -- "$dest_dir"
 
-  local repos
   repos="$(ghorg_list_repos "$source_org" \
     "$include_private" "$include_archived" "$include_forks" \
     | ghorg_filter_names "$include_re" "$exclude_re" \
-    | sort -u)"
+    | sort --unique)"
 
   if [ -z "$repos" ]; then
     printf 'no repos matched.\n' >&2
     return 0
   fi
 
-  printf '%s repos to process under %s\n' "$(printf '%s\n' "$repos" | wc -l)" "$dest_dir"
+  repo_count="$(printf '%s\n' "$repos" | wc -l)"
+  printf '%s repos to process under %s\n' "$repo_count" "$dest_dir"
 
   ## Bounded parallelism: keep at most $jobs background jobs alive.
-  local active=0
+  active=0
   while IFS= read -r repo; do
     [ -z "$repo" ] && continue
     clone_or_update_one "$repo" &

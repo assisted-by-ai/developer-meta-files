@@ -158,7 +158,8 @@ while [ "$#" -gt 0 ]; do
          exit 0
          ;;
       *)
-         printf 'unknown argument: %s\n' "$(ghorg_safe_print 64 "$1")" >&2
+         arg_safe="$(ghorg_safe_print 64 "$1")"
+         printf 'unknown argument: %s\n' "$arg_safe" >&2
          exit 64
          ;;
    esac
@@ -196,13 +197,16 @@ record_skip() {
 ## operator sees positive evidence that each setting was applied; the
 ## end-of-run summary then shows the totals.
 api_call() {
-   local label="$1" method="$2" path="$3" body="${4:-}"
+   local label method path body result status response_body safe_body
+   label="$1"
+   method="$2"
+   path="$3"
+   body="${4:-}"
    if [ "$dry_run" = '1' ]; then
       printf 'DRY-RUN: %s -> %s %s\n' "$label" "$method" "$path"
       api_record dry
       return 0
    fi
-   local result status
    result="$(ghorg_api "$method" "$path" "$body")" || {
       api_record warn
       return 1
@@ -215,8 +219,9 @@ api_call() {
          return 0
          ;;
       *)
-         printf 'warn: %s [%s]\n%s\n' "$label" "$status" \
-            "$(ghorg_safe_print 512 "$(ghorg_body_of "$result")")" >&2
+         response_body="$(ghorg_body_of "$result")"
+         safe_body="$(ghorg_safe_print 512 "$response_body")"
+         printf 'warn: %s [%s]\n%s\n' "$label" "$status" "$safe_body" >&2
          api_record warn
          return 1
          ;;
@@ -231,13 +236,15 @@ api_call() {
 ## Args: $1 = org, $2 = ruleset name (used for the GET-by-name match),
 ## $3 = JSON body (must include the same name).
 upsert_org_ruleset() {
-   local org="$1" name="$2" body="$3"
+   local org name body result status existing_id safe_id
+   org="$1"
+   name="$2"
+   body="$3"
    if [ "$dry_run" = '1' ]; then
       printf 'DRY-RUN: %s: upsert ruleset %s\n' "$org" "$name"
       return 0
    fi
 
-   local result status existing_id
    result="$(ghorg_api GET "/orgs/${org}/rulesets")" || return 1
    status="$(ghorg_status_of "$result")"
    if [ "$status" != '200' ]; then
@@ -252,8 +259,9 @@ upsert_org_ruleset() {
    if [ -n "$existing_id" ] && [ "$existing_id" != "null" ]; then
       ## Validate id is numeric before placing it into a URL path.
       if ! [[ "$existing_id" =~ ^[0-9]+$ ]]; then
+         safe_id="$(ghorg_safe_print 32 "$existing_id")"
          printf 'warn: %s: ruleset id %s not numeric; refusing\n' \
-            "$org" "$(ghorg_safe_print 32 "$existing_id")" >&2
+            "$org" "$safe_id" >&2
          return 1
       fi
       api_call "${org}: update ruleset id=${existing_id} (${name})" \
@@ -278,9 +286,11 @@ upsert_org_ruleset() {
 ## .github/workflows/codeql.yml) and private vulnerability reporting
 ## (project disclosure channel is OpenPGP email; see header notes).
 apply_code_security_config() {
-   local org="$1"
+   local org config_body list_result list_status existing_id
+   local create_result create_status attach_body default_body
+   local list_body list_safe_body create_body create_safe_body safe_id
+   org="$1"
 
-   local config_body
    config_body="$(jq -n --arg name "$CODE_SEC_CONFIG_NAME" '{
       name: $name,
       description: "Project-wide code security applied via dm-github-policy.",
@@ -304,14 +314,14 @@ apply_code_security_config() {
    fi
 
    ## Find existing configuration by name.
-   local list_result list_status existing_id
    list_result="$(ghorg_api GET "/orgs/${org}/code-security/configurations")" \
       || { api_record warn; return 1; }
    list_status="$(ghorg_status_of "$list_result")"
    if [ "$list_status" != '200' ]; then
+      list_body="$(ghorg_body_of "$list_result")"
+      list_safe_body="$(ghorg_safe_print 512 "$list_body")"
       printf 'warn: %s: list code-security configurations [%s]\n%s\n' \
-         "$org" "$list_status" \
-         "$(ghorg_safe_print 512 "$(ghorg_body_of "$list_result")")" >&2
+         "$org" "$list_status" "$list_safe_body" >&2
       api_record warn
       return 1
    fi
@@ -322,8 +332,9 @@ apply_code_security_config() {
 
    if [ -n "$existing_id" ] && [ "$existing_id" != 'null' ]; then
       if ! [[ "$existing_id" =~ ^[0-9]+$ ]]; then
+         safe_id="$(ghorg_safe_print 32 "$existing_id")"
          printf 'warn: %s: code-security config id %s not numeric; refusing\n' \
-            "$org" "$(ghorg_safe_print 32 "$existing_id")" >&2
+            "$org" "$safe_id" >&2
          api_record warn
          return 1
       fi
@@ -333,7 +344,6 @@ apply_code_security_config() {
    else
       ## POST returns the new config object including its id; we need
       ## the id for the attach + default calls.
-      local create_result create_status
       create_result="$(ghorg_api POST "/orgs/${org}/code-security/configurations" "$config_body")" \
          || { api_record warn; return 1; }
       create_status="$(ghorg_status_of "$create_result")"
@@ -345,9 +355,10 @@ apply_code_security_config() {
             api_record ok
             ;;
          *)
+            create_body="$(ghorg_body_of "$create_result")"
+            create_safe_body="$(ghorg_safe_print 512 "$create_body")"
             printf 'warn: %s: create code-security configuration [%s]\n%s\n' \
-               "$org" "$create_status" \
-               "$(ghorg_safe_print 512 "$(ghorg_body_of "$create_result")")" >&2
+               "$org" "$create_status" "$create_safe_body" >&2
             api_record warn
             return 1
             ;;
@@ -357,14 +368,12 @@ apply_code_security_config() {
    ## Attach to all existing repos in the org. scope=all covers every
    ## repo without listing them; the configuration's enforcement field
    ## takes care of the on/off state.
-   local attach_body
    attach_body="$(jq -n '{scope: "all"}')"
    api_call "${org}: attach code-security config to all repos" \
       POST "/orgs/${org}/code-security/configurations/${existing_id}/attach" \
       "$attach_body" || true
 
    ## Make this configuration the default for newly created repos.
-   local default_body
    default_body="$(jq -n '{default_for_new_repos: "all"}')"
    api_call "${org}: set code-security config as default for new repos" \
       PUT "/orgs/${org}/code-security/configurations/${existing_id}/defaults" \
@@ -375,10 +384,9 @@ apply_code_security_config() {
 ## actions, 2FA SKIP, member policy, code-security configuration,
 ## branch and tag rulesets, PAT and App SKIPs.
 apply_org_policy() {
-   local org="$1"
+   local org body branch_ruleset tag_ruleset
+   org="$1"
    printf '\n=== org policy: %s ===\n' "$org"
-
-   local body
 
    ## 1. Fork-PR contributor approval = all_external_contributors.
    body="$(jq -n '{approval_policy: "all_external_contributors"}')"
@@ -508,7 +516,6 @@ apply_org_policy() {
    ##        and named here; not feasible to apply uniformly).
    ##      - required_linear_history (opinionated; can break some
    ##        merge workflows).
-   local branch_ruleset
    branch_ruleset="$(jq -n --arg name "$RULESET_NAME_BRANCH" '{
       name: $name,
       target: "branch",
@@ -532,7 +539,6 @@ apply_org_policy() {
    ##    could move a release tag like v1.0 to point at a different
    ##    commit. Same bypass_actors=[] enforcement: nobody, including
    ##    owners, can override.
-   local tag_ruleset
    tag_ruleset="$(jq -n --arg name "$RULESET_NAME_TAG" '{
       name: $name,
       target: "tag",
@@ -603,8 +609,10 @@ apply_org_policy() {
 ## One-line GET-and-print helper for audit_org_state. Args:
 ##   $1 = label, $2 = API path, $3 = jq filter (default '.').
 audit_get() {
-   local label="$1" path="$2" jq_filter="${3:-.}"
-   local result status body
+   local label path jq_filter result status body extracted
+   label="$1"
+   path="$2"
+   jq_filter="${3:-.}"
    result="$(ghorg_api GET "$path")" || {
       printf '  %s: <api error>\n' "$label"
       return 0
@@ -617,10 +625,11 @@ audit_get() {
    body="$(ghorg_body_of "$result")"
    ## sanitize-string reads stdin natively, so the pipe is the
    ## sanitization step; ghorg_safe_print is for arg-form callers.
-   printf '  %s: %s\n' "$label" "$(printf '%s' "$body" \
+   extracted="$(printf '%s' "$body" \
       | jq -r "$jq_filter" 2>/dev/null \
       | tr '\n' ' ' \
       | sanitize-string 200)"
+   printf '  %s: %s\n' "$label" "$extracted"
 }
 
 ## Read-only inspection of an org's current security/policy state.
@@ -630,7 +639,14 @@ audit_get() {
 ## unverified third-party actions, and a 2FA enforcement that removes
 ## members without 2FA.
 audit_org_state() {
-   local org="$1"
+   local org result status body count names
+   local actions_result actions_status actions_body
+   local allowed_actions enabled_repos safe_allowed_actions safe_enabled_repos
+   local ruleset_body ruleset_name ids id safe_id member safe_member
+   local pending approved installs install_line total no_secret
+   local safe_pending safe_approved safe_total safe_no_secret safe_install_line
+   local repos repo missing_count have_count missing_list
+   org="$1"
    printf '\n=== audit: %s ===\n' "$org"
 
    audit_get 'fork-PR approval policy' \
@@ -646,17 +662,23 @@ audit_org_state() {
    ## /actions/permissions/selected-actions when allowed_actions is
    ## not "selected" - audit shouldn't print a noisy HTTP 409 for
    ## that expected case; it should print "(N/A)" with the reason.
-   local _ap_result _ap_status _ap_body allowed_actions=''
-   _ap_result="$(ghorg_api GET "/orgs/${org}/actions/permissions")" || true
-   _ap_status="$(ghorg_status_of "$_ap_result")"
-   if [ "$_ap_status" = '200' ]; then
-      _ap_body="$(ghorg_body_of "$_ap_result")"
-      allowed_actions="$(printf '%s' "$_ap_body" | jq --raw-output '.allowed_actions // "?"')"
+   allowed_actions=''
+   actions_result="$(ghorg_api GET "/orgs/${org}/actions/permissions")" || true
+   actions_status="$(ghorg_status_of "$actions_result")"
+   if [ "$actions_status" = '200' ]; then
+      actions_body="$(ghorg_body_of "$actions_result")"
+      ## Both extracted from untrusted body: sanitize before display.
+      ## allowed_actions also gates a downstream conditional below;
+      ## the comparison there is exact-string against literals so a
+      ## hostile-byte value just falls into the N/A branch.
+      allowed_actions="$(printf '%s' "$actions_body" | jq --raw-output '.allowed_actions // "?"')"
+      enabled_repos="$(printf '%s' "$actions_body" | jq --raw-output '.enabled_repositories // "?"')"
+      safe_allowed_actions="$(ghorg_safe_print 64 "$allowed_actions")"
+      safe_enabled_repos="$(ghorg_safe_print 64 "$enabled_repos")"
       printf '  actions allowed_actions: enabled_repos=%s, allowed_actions=%s\n' \
-         "$(printf '%s' "$_ap_body" | jq --raw-output '.enabled_repositories // "?"')" \
-         "$allowed_actions"
+         "$safe_enabled_repos" "$safe_allowed_actions"
    else
-      printf '  actions allowed_actions: HTTP %s\n' "$_ap_status"
+      printf '  actions allowed_actions: HTTP %s\n' "$actions_status"
    fi
 
    if [ "$allowed_actions" = 'selected' ]; then
@@ -665,7 +687,7 @@ audit_org_state() {
          '"github_owned=" + ((.github_owned_allowed // false) | tostring) + ", verified=" + ((.verified_allowed // false) | tostring) + ", patterns=" + ((.patterns_allowed // []) | length | tostring)'
    else
       printf '  selected-actions allow-list: (N/A while allowed_actions=%s)\n' \
-         "${allowed_actions:-?}"
+         "${safe_allowed_actions:-?}"
    fi
 
    audit_get '2FA required for org members' \
@@ -680,7 +702,6 @@ audit_org_state() {
    ## enforcement were enabled. Paginate; stop after a sensible cap to
    ## avoid runaway output if the org has many such members.
    printf '  members lacking 2FA (would be removed by enforcement):\n'
-   local result status body count names
    result="$(ghorg_api GET "/orgs/${org}/members?filter=2fa_disabled&per_page=100")" || true
    status="$(ghorg_status_of "$result")"
    if [ "$status" = '200' ]; then
@@ -690,9 +711,10 @@ audit_org_state() {
          printf '    (none)\n'
       else
          names="$(printf '%s' "$body" | jq -r '.[].login')"
-         while IFS= read -r u; do
-            [ -z "$u" ] && continue
-            printf '    - %s\n' "$(ghorg_safe_print 64 "$u")"
+         while IFS= read -r member; do
+            [ -z "$member" ] && continue
+            safe_member="$(ghorg_safe_print 64 "$member")"
+            printf '    - %s\n' "$safe_member"
          done <<< "$names"
       fi
    else
@@ -703,19 +725,19 @@ audit_org_state() {
    result="$(ghorg_api GET "/orgs/${org}/rulesets")" || true
    status="$(ghorg_status_of "$result")"
    if [ "$status" = '200' ]; then
-      local ruleset_body name ids
       ruleset_body="$(ghorg_body_of "$result")"
-      for name in "$RULESET_NAME_BRANCH" "$RULESET_NAME_TAG"; do
-         printf '  existing rulesets named "%s":\n' "$name"
+      for ruleset_name in "$RULESET_NAME_BRANCH" "$RULESET_NAME_TAG"; do
+         printf '  existing rulesets named "%s":\n' "$ruleset_name"
          ids="$(printf '%s' "$ruleset_body" \
-            | jq -r --arg name "$name" \
+            | jq -r --arg name "$ruleset_name" \
               '.[] | select(.name == $name) | .id' || true)"
          if [ -z "$ids" ]; then
             printf '    (none; --apply would create one)\n'
          else
             while IFS= read -r id; do
                [ -z "$id" ] && continue
-               printf '    - id=%s\n' "$(ghorg_safe_print 32 "$id")"
+               safe_id="$(ghorg_safe_print 32 "$id")"
+               printf '    - id=%s\n' "$safe_id"
             done <<< "$ids"
          fi
       done
@@ -735,9 +757,9 @@ audit_org_state() {
       200)
          ## Count via the JSON length on this page; use a HEAD-style
          ## follow-up if exact totals matter (skipped for simplicity).
-         local pending
          pending="$(ghorg_body_of "$result" | jq 'length' 2>/dev/null || printf '?')"
-         printf '    pending requests on first page: %s\n' "$pending"
+         safe_pending="$(ghorg_safe_print 32 "$pending")"
+         printf '    pending requests on first page: %s\n' "$safe_pending"
          ;;
       404|403)
          printf '    requests endpoint: HTTP %s (approval flow may be off / token lacks scope)\n' "$status"
@@ -748,9 +770,9 @@ audit_org_state() {
    status="$(ghorg_status_of "$result")"
    case "$status" in
       200)
-         local approved
          approved="$(ghorg_body_of "$result" | jq 'length' 2>/dev/null || printf '?')"
-         printf '    approved tokens on first page: %s\n' "$approved"
+         safe_approved="$(ghorg_safe_print 32 "$approved")"
+         printf '    approved tokens on first page: %s\n' "$safe_approved"
          ;;
       *) printf '    approved tokens endpoint: HTTP %s\n' "$status" ;;
    esac
@@ -761,16 +783,18 @@ audit_org_state() {
    result="$(ghorg_api GET "/orgs/${org}/installations?per_page=100")" || true
    status="$(ghorg_status_of "$result")"
    if [ "$status" = '200' ]; then
-      local installs
       installs="$(ghorg_body_of "$result" \
          | jq -r '.installations[]? | "    - " + (.app_slug // "?") + " (id=" + ((.id // 0) | tostring) + ")"' \
          2>/dev/null || true)"
       if [ -z "$installs" ]; then
          printf '    (none)\n'
       else
-         while IFS= read -r line; do
-            [ -z "$line" ] && continue
-            printf '%s\n' "$line"
+         while IFS= read -r install_line; do
+            [ -z "$install_line" ] && continue
+            ## install_line is jq-extracted from an untrusted body
+            ## (.app_slug + .id concatenated). Sanitize before display.
+            safe_install_line="$(ghorg_safe_print 200 "$install_line")"
+            printf '%s\n' "$safe_install_line"
          done <<< "$installs"
       fi
    else
@@ -787,15 +811,16 @@ audit_org_state() {
    result="$(ghorg_api GET "/orgs/${org}/hooks?per_page=100")" || true
    status="$(ghorg_status_of "$result")"
    if [ "$status" = '200' ]; then
-      local total no_secret
       total="$(ghorg_body_of "$result" | jq 'length' 2>/dev/null || printf '?')"
       no_secret="$(ghorg_body_of "$result" \
          | jq '[.[] | select(.config.secret == null or .config.secret == "")] | length' \
          2>/dev/null || printf '?')"
+      safe_total="$(ghorg_safe_print 32 "$total")"
+      safe_no_secret="$(ghorg_safe_print 32 "$no_secret")"
       if [ "$total" = '0' ]; then
          printf '    (none configured)\n'
       else
-         printf '    total=%s, lacking secret=%s\n' "$total" "$no_secret"
+         printf '    total=%s, lacking secret=%s\n' "$safe_total" "$safe_no_secret"
       fi
    else
       printf '    HTTP %s (token may lack admin:org_hook scope)\n' "$status"
@@ -808,7 +833,6 @@ audit_org_state() {
    ## file still fail Scorecard. This audit counts repos with vs
    ## without and lists the missing ones as a worklist.
    printf '  dependabot.yml presence (Scorecard "Dependency-Update-Tool"):\n'
-   local repos missing_count have_count missing_list
    repos="$(ghorg_list_repos "$org" 0 0 0 | sort --unique)"
    if [ -z "$repos" ]; then
       printf '    (no public non-archived non-fork repos)\n'
@@ -839,18 +863,26 @@ audit_org_state() {
 ## the per-repo loop has shrunk to wiki-off / issues-on (these have no
 ## "apply to all repos" org endpoint).
 apply_repo_policy() {
-   local owner="$1" repo="$2"
+   local owner repo patch
+   owner="$1"
+   repo="$2"
    ghorg_validate_name "$owner" user || return 1
    ghorg_validate_name "$repo"  repo || return 1
 
-   local patch
    patch="$(jq -n '{has_wiki: false, has_issues: true}')"
    api_call "${owner}/${repo}: wiki=off, issues=on" \
       PATCH "/repos/${owner}/${repo}" "$patch" || true
 }
 
+## Trap target for main()'s tally tempfile. Uses api_counter_file
+## from the script-global scope so the trap signature is a bare
+## function name rather than an inline command string.
+dm_github_policy_cleanup_counter_file() {
+   rm -f -- "$api_counter_file"
+}
+
 main() {
-   local org repos
+   local org repos active repo n_ok n_warn n_dry n_skip
    if [ "$mode" = 'audit' ]; then
       for org in "${ORGS[@]}"; do
          audit_org_state "$org"
@@ -863,7 +895,7 @@ main() {
    ## environment so their api_record appends land in the same file.
    api_counter_file="$(mktemp)"
    export api_counter_file
-   trap 'rm -f -- "$api_counter_file"' EXIT
+   trap dm_github_policy_cleanup_counter_file EXIT
 
    for org in "${ORGS[@]}"; do
       apply_org_policy "$org"
@@ -873,13 +905,13 @@ main() {
       ## endpoints already cover security products on every repo; this
       ## loop is just for has_wiki / has_issues which have no org-wide
       ## API.
-      repos="$(ghorg_list_repos "$org" 0 0 0 | sort -u)"
+      repos="$(ghorg_list_repos "$org" 0 0 0 | sort --unique)"
       if [ -z "$repos" ]; then
          printf 'no repos matched in %s\n' "$org" >&2
          continue
       fi
 
-      local active=0
+      active=0
       while IFS= read -r repo; do
          [ -z "$repo" ] && continue
          apply_repo_policy "$org" "$repo" &
@@ -894,7 +926,6 @@ main() {
 
    ## End-of-run summary. Each api_call / record_skip appended one
    ## line per event; sum by status.
-   local n_ok n_warn n_dry n_skip
    n_ok="$(  grep --count -- '^ok$'   "$api_counter_file" 2>/dev/null || true)"
    n_warn="$(grep --count -- '^warn$' "$api_counter_file" 2>/dev/null || true)"
    n_dry="$( grep --count -- '^dry$'  "$api_counter_file" 2>/dev/null || true)"
