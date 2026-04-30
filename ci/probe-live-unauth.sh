@@ -74,7 +74,7 @@ out_dir="$(mktemp --directory)"
 ## (not an inline command string) so the trap is auditable as a
 ## named callable rather than a quoted snippet.
 probe_live_unauth_cleanup_out_dir() {
-   rm -rf -- "$out_dir"
+   rm -r -f -- "$out_dir"
 }
 trap probe_live_unauth_cleanup_out_dir EXIT
 
