@@ -1,3 +1,195 @@
+commit 0b42fa3584009819c3785021530682cc90c68850
+Merge: b917caf d5a8747
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Thu Apr 30 17:32:02 2026 -0400
+
+    Merge remote-tracking branch 'assisted-by-ai/claude/configure-repo-access-hZI4X'
+
+commit d5a8747eb7e00ab12b268648bc2e4d3e4e2f2963
+Author: Claude <noreply@anthropic.com>
+Date:   Thu Apr 30 21:09:52 2026 +0000
+
+    add github-org-* tools, dm-fork-sync, dm-github-policy, CI suite
+
+    Three coordinated additions:
+    1. Generic GitHub-org tooling under usr/bin (github-org-clone,
+       github-org-fork, github-org-push, github-org-set-fork-approval)
+       plus the shared library github-org-lib.bsh.
+    2. Project-policy wrappers dm-fork-sync and dm-github-policy.
+    3. CI mock-API test suite under ci/, plus two GitHub Actions
+       workflows (mock-tests, live audit).
+
+    Tools (usr/bin/github-org-*):
+
+    - github-org-clone <source-org> [<dest-dir>]
+      Clone or fast-forward every public, non-archived, non-fork repo
+      from the source into <dest-dir>/<repo-name>/. Idempotent.
+    - github-org-fork <source-owner> <target-owner>
+      Fork every selected source repo into the target. Source/target
+      may each be a User or an Organization. Optional flags configure
+      target settings (--disable-issues/wiki/projects, --actions
+      {enable|disable|leave}, --workflow-perms {read|write|leave}).
+    - github-org-push <source-dir> <target-owner>
+      Push HEAD (and optionally tags) from each clone under source-dir
+      to a same-named target repo. Refuses to push if missing.
+    - github-org-set-fork-approval <org> [<policy>]
+      Set the org-level fork-PR contributor approval policy. Default
+      policy: all_external_contributors.
+
+    Common defaults: skip private/archived/fork repos on the source
+    side; 4 parallel jobs where applicable; --dry-run, -v/--verbose,
+    --include/--exclude REGEX, --ssh|--https. Auth via GITHUB_TOKEN env
+    or chmod-600 ~/.config/github-token. No gh CLI dependency.
+
+    Shared library (usr/libexec/developer-meta-files/github-org-lib.bsh):
+
+    - Token resolution from env or chmod-600 token file. Refuses
+      symlinks (defeats stat-then-read perm-check).
+    - ghorg_api: token via curl --config from stdin so it never appears
+      in argv (no ps aux leak). Pinned to https with --proto / --proto-
+      redir; bounded by --connect-timeout / --max-time; capped at
+      --max-filesize 10 MB.
+    - Rate-limit retry on HTTP 429, 5xx, and 403-rate-limit body.
+      Honors Retry-After and X-RateLimit-Reset; falls back to
+      exponential backoff. GHORG_MAX_RETRIES, GHORG_MAX_BACKOFF_SECONDS.
+    - Mock mode: GHORG_MOCK=1 GHORG_MOCK_DIR=path serves canned
+      responses from local fixtures. Missing fixture returns HTTP 599
+      so tests fail loudly.
+    - Token-handling functions wrap with `local -; set +x` so an
+      enclosing set -x cannot leak the secret.
+    - Account-type probe (User vs Organization) with caching;
+      paginated listing routed to the right endpoint. For User owners
+      with --include-private, switches to /user/repos?affiliation=owner
+      and refuses if the listed user is not the auth user.
+    - ghorg_repo_lookup: 0 = exists, 1 = 404, 2 = other failure.
+    - ghorg_authenticated_user (cached) + ghorg_repo_parent (for
+      cross-source name-collision detection).
+    - ghorg_validate_name: every API-supplied identifier must match
+      ^[A-Za-z0-9._-]+$, length-capped, no leading dash, no embedded
+      "..", not equal to . / .. / .git. Allows .github / .gitignore.
+    - Safe display via sanitize-string for any error message that
+      includes API-derived bytes.
+
+    Project-policy wrappers (usr/bin/):
+
+    - dm-fork-sync: thin wrapper around github-org-fork. Mirrors
+      source orgs into the bot account.
+    - dm-github-policy: applies project-wide GitHub security policy.
+      Modes: default --apply, --dry-run, --audit (read-only). End-of-
+      run summary with ok / warn / dry-run / skip counts.
+
+      Settings applied at the org level:
+      - Fork-PR contributor approval = all_external_contributors
+      - Default workflow GITHUB_TOKEN permissions = read; cannot
+        create or approve pull requests
+      - Allowed Actions = github-owned + verified creators
+      - Member policy: default-perm=read, no member create
+      - Code Security Configurations API: a single org-level
+        configuration enables secret scanning, push protection,
+        Dependabot alerts and security updates, dependency graph,
+        explicitly disables CodeQL default setup and private
+        vulnerability reporting; attached to all existing repos and
+        set as the default for new repos. Replaces the deprecated
+        PATCH /orgs/{org} security-defaults fields and the
+        /orgs/{org}/{product}/enable_all family.
+      - Default-branch ruleset: block force-push, block deletion,
+        require signed commits, bypass_actors=[] (no admin override).
+        Deliberately does not include the pull_request rule
+        (maintainers push directly to master).
+      - Tag ruleset: block deletion, block re-pointing, require
+        signed tags, bypass_actors=[].
+
+      Per-repo settings (no org-wide endpoint exists):
+      - has_wiki=false, has_issues=true.
+
+      SKIP+notify with UI URL pointers for: 2FA enforcement, PAT
+      policies, App/OAuth policies. Verified against the GitHub
+      OpenAPI spec to be UI-only.
+
+      --audit reports current state of every applied setting plus
+      members lacking 2FA, existing rulesets, fine-grained PAT
+      activity, installed GitHub Apps, org-level webhooks lacking a
+      secret (Scorecard "Webhooks" Critical-risk gap), and
+      .github/dependabot.yml file presence per repo (Scorecard
+      "Dependency-Update-Tool" file-based detection).
+
+      Help text documents the OSSF Scorecard mapping per check
+      (Branch-Protection ceiling = Tier 1 deliberate; Code-Review,
+      CodeQL, Maintained = out of scope; etc.).
+
+    Test-only configuration: ORGS in dm-github-policy and SOURCE_ORGS
+    in dm-fork-sync currently target ('org-ai-assisted'). The
+    production list ('Kicksecure', 'Whonix') is preserved as a
+    single-line comment above the active line for easy revert.
+    dm-packaging-helper-script: same comment-out pattern; the
+    batch_current_package_remote_list mirror is org-ai-assisted (was
+    assisted-by-ai); the corresponding remote-add line is added in
+    pkg_git_remotes_add.
+
+    CI infrastructure (ci/ + .github/workflows/):
+
+    - ci/fixtures/: 32 canned responses for the test org, the auth
+      user, /user/repos, every org-policy GET that audit and dry-run
+      paths hit, plus webhooks list and per-repo dependabot.yml
+      contents lookups.
+    - ci/tests/test_*.sh: 10 mock-API tests covering github-org-*
+      arg parsing, dry-run flow, --get/--audit, the validator's
+      attack-pattern rejection, the rate-limit-wait header parser,
+      and a shellcheck-clean enforcement test that subjects every
+      authored file to project-wide .shellcheckrc rules.
+    - ci/test-github-org-tools.sh: runs every test_*.sh; quiet on
+      success, prints captured logs on failure. Refuses to run
+      outside CI=true.
+    - ci/install-genmkfile.sh + ci/install-helper-scripts.sh:
+      standalone install scripts for CI; refuse to run outside
+      CI=true.
+    - ci/probe-live-unauth.sh: best-effort live unauth smoke against
+      the real REST API; exits 0 with a skip message if the rate-
+      limit bucket is exhausted.
+    - .github/workflows/test-github-org-tools.yml: runs the suite
+      on push to master/claude/** and on every PR. Container
+      debian:trixie. paths: filter so it only runs on github-org-*,
+      dm-* tools, github-org-lib, ci/, or the workflow itself.
+      permissions: contents: read only.
+    - .github/workflows/audit-live.yml: manual-trigger
+      (workflow_dispatch only) live audit using a repo secret
+      GHORG_AUDIT_TOKEN (read-only fine-grained PAT). Guarded by
+      github.repository check so forks cannot use the secret;
+      pre-flight step verifies the secret is present and exits 1
+      otherwise.
+
+    Strict shell options on every authored script:
+      set -o errexit / nounset / pipefail / errtrace
+      shopt -s inherit_errexit / shift_verbose
+
+    Long option names everywhere (--quiet, --fixed-strings,
+    --ignore-case, --extended-regexp, --invert-match, --count,
+    --line-number, --lines=N). End-of-options separator (--) on
+    grep, head, sed, find, basename, sanitize-string calls that
+    take patterns or potentially untrusted strings.
+
+    Header on every authored file:
+      ## Copyright (C) 2026 - 2026 ENCRYPTED SUPPORT LLC <...>
+      ## See the file COPYING for copying conditions.
+
+      ## AI-Assisted
+
+    The "AI-Assisted" marker discloses substantial AI involvement
+    without naming any specific tool or person, so the disclosure
+    does not invite per-file fame creep on minor contributions.
+
+    Defensive permissions on the workflow files: actions: write
+    intentionally not granted. actions/upload-artifact@v7 was tested
+    empirically against contents: read alone (run id 24967508066);
+    the artifact backend uses the workflow run's own identity, not
+    the GITHUB_TOKEN's permission scope.
+
+commit b917caf47f1fe757d571604d98863edc88737f51
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Wed Apr 29 09:01:11 2026 +0000
+
+    bumped changelog version
+
 commit a2aae8db4fa635c768abcbea5c93b33ca8b56604
 Merge: 8274943 d141554
 Author: Patrick Schleizer <adrelanos@whonix.org>
