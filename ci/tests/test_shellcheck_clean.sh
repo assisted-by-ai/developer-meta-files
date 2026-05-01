@@ -30,42 +30,42 @@ if ! command -v shellcheck >/dev/null 2>&1; then
 fi
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
-REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 
 ## Files this test owns. Keep the list explicit rather than globbing
 ## the whole repo - the github-org-* tools and the dm-* wrappers are
 ## the surface this PR introduced; other parts of developer-meta-files
 ## have their own pre-existing shellcheck status that is out of scope.
 files=(
-   "$REPO_ROOT/usr/bin/github-org-clone"
-   "$REPO_ROOT/usr/bin/github-org-fork"
-   "$REPO_ROOT/usr/bin/github-org-push"
-   "$REPO_ROOT/usr/bin/github-org-set-fork-approval"
-   "$REPO_ROOT/usr/bin/dm-github-policy"
-   "$REPO_ROOT/usr/bin/dm-fork-sync"
-   "$REPO_ROOT/usr/libexec/developer-meta-files/github-org-lib.bsh"
-   "$REPO_ROOT/ci/test-github-org-tools.sh"
-   "$REPO_ROOT/ci/install-genmkfile.sh"
-   "$REPO_ROOT/ci/install-helper-scripts.sh"
-   "$REPO_ROOT/ci/probe-live-unauth.sh"
+   "${REPO_ROOT}/usr/bin/github-org-clone"
+   "${REPO_ROOT}/usr/bin/github-org-fork"
+   "${REPO_ROOT}/usr/bin/github-org-push"
+   "${REPO_ROOT}/usr/bin/github-org-set-fork-approval"
+   "${REPO_ROOT}/usr/bin/dm-github-policy"
+   "${REPO_ROOT}/usr/bin/dm-fork-sync"
+   "${REPO_ROOT}/usr/libexec/developer-meta-files/github-org-lib.bsh"
+   "${REPO_ROOT}/ci/test-github-org-tools.sh"
+   "${REPO_ROOT}/ci/install-genmkfile.sh"
+   "${REPO_ROOT}/ci/install-helper-scripts.sh"
+   "${REPO_ROOT}/ci/probe-live-unauth.sh"
 )
 ## Append every test_*.sh under ci/tests so adding a new test
 ## automatically subjects it to the same check.
 while IFS= read -r -d '' script_path; do
-   files+=( "$script_path" )
-done < <(find -- "$REPO_ROOT/ci/tests" -mindepth 1 -maxdepth 1 \
+   files+=( "${script_path}" )
+done < <(find -- "${REPO_ROOT}/ci/tests" -mindepth 1 -maxdepth 1 \
          -type f -name 'test_*.sh' -print0 | sort --zero-terminated)
 
 fail=0
 for script_path in "${files[@]}"; do
-   if [ ! -r "$script_path" ]; then
-      printf '%s\n' "FAIL: not readable: $script_path" >&2
+   if [ ! -r "${script_path}" ]; then
+      printf '%s\n' "FAIL: not readable: ${script_path}" >&2
       fail=1
       continue
    fi
-   if ! shellcheck -- "$script_path"; then
+   if ! shellcheck -- "${script_path}"; then
       fail=1
    fi
 done
 
-exit "$fail"
+exit "${fail}"

@@ -12,18 +12,11 @@ shopt -s inherit_errexit
 
 true "INFO: Currently running script: ${BASH_SOURCE[0]} $*"
 
-## Production mirror target (the bot user account where forks land).
-## Defined here near the top of the script so it can be updated in one
-## place; referenced in pkg_git_remotes_add and the commented-out
-## production line in set_batch_current_package_remote_list.
-readonly DM_GITHUB_PROD_MIRROR='assisted-by-ai'
-
-## Test mirror target (the org used for end-to-end tests until the
-## production mirror is promoted). Defined here near the top of the
-## script so it can be updated in one place; referenced in
-## pkg_git_remotes_add and the active line in
+## Production mirror target: the GitHub org that holds forks of every
+## Kicksecure/Whonix package repo. Declared here so it can be updated
+## in one place; referenced in pkg_git_remotes_add and
 ## set_batch_current_package_remote_list.
-readonly DM_GITHUB_TEST_MIRROR='org-ai-assisted'
+readonly DM_GITHUB_MIRROR='org-ai-assisted'
 
 MYDIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
 
@@ -666,8 +659,7 @@ get_package_documentation_info_list() {
 ## TODO: Use this function as the single source of truth for most of these
 ## remote names, rather than duplicating info.
 set_batch_current_package_remote_list() {
-   #batch_current_package_remote_list=( "github-${batch_current_project_name,,}" "${DM_GITHUB_PROD_MIRROR}" )
-   #batch_current_package_remote_list=( "github-${batch_current_project_name,,}" "${DM_GITHUB_TEST_MIRROR}" )
+   #batch_current_package_remote_list=( "github-${batch_current_project_name,,}" "${DM_GITHUB_MIRROR}" )
    batch_current_package_remote_list=( "github-${batch_current_project_name,,}" )
 
    ## derivative-maker has a couple extra remotes
@@ -1127,13 +1119,11 @@ pkg_links_open() {
 pkg_git_remotes_add() {
    git remote rm origin || true
 
-   git remote add     "${DM_GITHUB_PROD_MIRROR}"         "git@github.com:${DM_GITHUB_PROD_MIRROR}/${batch_current_package_reponame}.git" || true
-   git remote set-url "${DM_GITHUB_PROD_MIRROR}"         "git@github.com:${DM_GITHUB_PROD_MIRROR}/${batch_current_package_reponame}.git" || true
-
-   ## Test target: the DM_GITHUB_TEST_MIRROR org. Defined here so the
-   ## mirror remote in set_batch_current_package_remote_list resolves.
-   git remote add     "${DM_GITHUB_TEST_MIRROR}"        "git@github.com:${DM_GITHUB_TEST_MIRROR}/${batch_current_package_reponame}.git" || true
-   git remote set-url "${DM_GITHUB_TEST_MIRROR}"        "git@github.com:${DM_GITHUB_TEST_MIRROR}/${batch_current_package_reponame}.git" || true
+   ## Mirror org (DM_GITHUB_MIRROR) - holds forks of every package repo.
+   git remote add     "${DM_GITHUB_MIRROR}" \
+      "git@github.com:${DM_GITHUB_MIRROR}/${batch_current_package_reponame}.git" || true
+   git remote set-url "${DM_GITHUB_MIRROR}" \
+      "git@github.com:${DM_GITHUB_MIRROR}/${batch_current_package_reponame}.git" || true
 
    git remote add     adrelanos         "git@github.com:adrelanos/${batch_current_package_reponame}.git" || true
    git remote set-url adrelanos         "git@github.com:adrelanos/${batch_current_package_reponame}.git" || true

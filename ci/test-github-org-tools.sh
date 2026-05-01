@@ -34,11 +34,11 @@ if [ "${CI:-}" != "true" ]; then
 fi
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
-TESTS_DIR="$SCRIPT_DIR/tests"
-FIXTURE_DIR="$SCRIPT_DIR/fixtures"
+TESTS_DIR="${SCRIPT_DIR}/tests"
+FIXTURE_DIR="${SCRIPT_DIR}/fixtures"
 
-if [ ! -d "$TESTS_DIR" ]; then
-  printf '%s\n' "error: tests directory missing: $TESTS_DIR" >&2
+if [ ! -d "${TESTS_DIR}" ]; then
+  printf '%s\n' "error: tests directory missing: ${TESTS_DIR}" >&2
   exit 1
 fi
 
@@ -63,28 +63,28 @@ pass=0
 fail=0
 fail_names=()
 
-for test_path in "$TESTS_DIR"/test_*.sh; do
-  test_name="$(basename -- "$test_path")"
-  printf '%s\n' "== $test_name =="
+for test_path in "${TESTS_DIR}"/test_*.sh; do
+  test_name="$(basename -- "${test_path}")"
+  printf '%s\n' "== ${test_name} =="
   log_file="$(mktemp)"
-  if GHORG_MOCK_DIR="$FIXTURE_DIR" bash -- "$test_path" > "$log_file" 2>&1; then
+  if GHORG_MOCK_DIR="${FIXTURE_DIR}" bash -- "${test_path}" > "${log_file}" 2>&1; then
     printf '%s\n' '  PASS'
     pass=$(( pass + 1 ))
   else
     printf '%s\n' '  FAIL'
-    sed -- 's/^/    | /' "$log_file"
+    sed -- 's/^/    | /' "${log_file}"
     fail=$(( fail + 1 ))
-    fail_names+=( "$test_name" )
+    fail_names+=( "${test_name}" )
   fi
-  safe-rm --force -- "$log_file"
+  safe-rm --force -- "${log_file}"
 done
 
 printf '%s\n' ""
-printf '%s\n' "=== summary: $pass passed, $fail failed ==="
-if [ "$fail" -gt 0 ]; then
+printf '%s\n' "=== summary: ${pass} passed, ${fail} failed ==="
+if [ "${fail}" -gt 0 ]; then
   printf '%s\n' 'failures:'
   for fname in "${fail_names[@]}"; do
-    printf '%s\n' "  - $fname"
+    printf '%s\n' "  - ${fname}"
   done
   exit 1
 fi

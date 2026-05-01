@@ -24,10 +24,10 @@ if [ "${CI:-}" != "true" ]; then
 fi
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
-FIXTURE_DIR="$(cd -- "$SCRIPT_DIR/../fixtures" && pwd)"
+FIXTURE_DIR="$(cd -- "${SCRIPT_DIR}/../fixtures" && pwd)"
 
 export GHORG_MOCK=1
-export GHORG_MOCK_DIR="$FIXTURE_DIR"
+export GHORG_MOCK_DIR="${FIXTURE_DIR}"
 
 ## Auth user is "assisted-by-ai" per GET_user fixture; we ask for
 ## private repos of "org-ai-assisted" (an Org, not a User), so the User-
@@ -43,10 +43,10 @@ export GHORG_MOCK_DIR="$FIXTURE_DIR"
 out="$(github-org-clone --include-private --dry-run assisted-by-ai \
   /tmp/clone-private-user-out 2>&1 || true)"
 
-if grep --quiet -- 'cannot list private repos' <<< "$out"; then
+if grep --quiet -- 'cannot list private repos' <<< "${out}"; then
   printf '%s\n' \
     'FAIL: did not expect a refusal for the auth user listing their own privates' \
-    "$out" >&2
+    "${out}" >&2
   exit 1
 fi
 

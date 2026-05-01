@@ -67,28 +67,72 @@ Refusal modes:
     refuse to push to that repo and report; other repos continue.
 
 Auth:
-  $GITHUB_TOKEN env var, or chmod-600 ~/.config/github-token. Token
+  ${GITHUB_TOKEN} env var, or chmod-600 ~/.config/github-token. Token
   needs `repo` scope to push.
 EOF
 }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --branches) branches="$2"; shift 2 ;;
-    --tags)     push_tags=1; shift ;;
-    --remote-name) remote_name="$2"; shift 2 ;;
-    --include) include_re="$2"; shift 2 ;;
-    --exclude) exclude_re="$2"; shift 2 ;;
-    --ssh)     url_scheme='ssh'; shift ;;
-    --https)   url_scheme='https'; shift ;;
-    --jobs)    jobs="$2"; shift 2 ;;
-    --create-missing) create_missing=1; shift ;;
-    --dry-run) dry_run=1; shift ;;
-    -v|--verbose) verbose=1; shift ;;
-    -h|--help) show_help; exit 0 ;;
-    --) shift; break ;;
-    -*) printf '%s\n' "unknown option: $1" >&2; exit 64 ;;
-    *)  break ;;
+    --branches)
+      branches="$2"
+      shift 2
+      ;;
+    --tags)
+      push_tags=1
+      shift
+      ;;
+    --remote-name)
+      remote_name="$2"
+      shift 2
+      ;;
+    --include)
+      include_re="$2"
+      shift 2
+      ;;
+    --exclude)
+      exclude_re="$2"
+      shift 2
+      ;;
+    --ssh)
+      url_scheme='ssh'
+      shift
+      ;;
+    --https)
+      url_scheme='https'
+      shift
+      ;;
+    --jobs)
+      jobs="$2"
+      shift 2
+      ;;
+    --create-missing)
+      create_missing=1
+      shift
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    -v|--verbose)
+      verbose=1
+      shift
+      ;;
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      printf '%s\n' "unknown option: $1" >&2
+      exit 64
+      ;;
+    *)
+      break
+      ;;
   esac
 done
 
@@ -99,7 +143,7 @@ fi
 
 source_dir="$1"
 target_owner="$2"
-[ -z "$remote_name" ] && remote_name="$target_owner"
+[ -z "${remote_name}" ] && remote_name="${target_owner}"
 
 ghorg_require_deps
 
@@ -108,7 +152,7 @@ remote_url() {
 
   repo="$1"
 
-  case "$url_scheme" in
+  case "${url_scheme}" in
     ssh)   printf '%s' "git@github.com:${target_owner}/${repo}.git" ;;
     https) printf '%s' "https://github.com/${target_owner}/${repo}.git" ;;
   esac
@@ -118,14 +162,14 @@ push_one() {
   local repo_dir repo url branch resolved_head safe_repo_dir
 
   repo_dir="$1"
-  repo="$(basename -- "$repo_dir")"
+  repo="$(basename -- "${repo_dir}")"
 
   ## Validate the directory-derived name before using it as a URL or
   ## API parameter. Same allowlist rules as for API-supplied names so
   ## a hostile filesystem can't smuggle bad names either.
-  if ! ghorg_validate_name "$repo" repo; then
-    safe_repo_dir="$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$repo_dir")"
-    printf '%s\n' "warn: skipping $safe_repo_dir (invalid name)" >&2
+  if ! ghorg_validate_name "${repo}" repo; then
+    safe_repo_dir="$(ghorg_safe_print "${GHORG_MAX_DISPLAY_LEN}" "${repo_dir}")"
+    printf '%s\n' "warn: skipping ${safe_repo_dir} (invalid name)" >&2
     return 0
   fi
 
@@ -134,11 +178,11 @@ push_one() {
   ## know for sure the repo isn't there; otherwise treat it as a hard
   ## error so a bad token or transient outage doesn't silently no-op
   ## an entire run.
-  ghorg_repo_lookup "$target_owner" "$repo"
+  ghorg_repo_lookup "${target_owner}" "${repo}"
   case $? in
     0) ;;
     1)
-      if [ "$create_missing" = '1' ]; then
+      if [ "${create_missing}" = '1' ]; then
         ## Reserved flag for future use; deliberately not implemented to
         ## avoid surprise repo creation. github-org-fork is the supported
         ## path for adding repos to the target.
@@ -157,60 +201,60 @@ push_one() {
       ;;
   esac
 
-  url="$(remote_url "$repo")"
+  url="$(remote_url "${repo}")"
 
-  if [ "$dry_run" = '1' ]; then
+  if [ "${dry_run}" = '1' ]; then
     printf '%s\n' \
-      "DRY-RUN: push $repo_dir -> $url (branches: $branches, tags: $push_tags)"
+      "DRY-RUN: push ${repo_dir} -> ${url} (branches: ${branches}, tags: ${push_tags})"
     return 0
   fi
 
   ## Add or refresh the named remote unconditionally so URL drift is
   ## corrected on every run.
-  if git -C "$repo_dir" remote get-url "$remote_name" >/dev/null 2>&1; then
-    git -C "$repo_dir" remote set-url "$remote_name" "$url"
+  if git -C "${repo_dir}" remote get-url "${remote_name}" >/dev/null 2>&1; then
+    git -C "${repo_dir}" remote set-url "${remote_name}" "${url}"
   else
-    git -C "$repo_dir" remote add "$remote_name" "$url"
+    git -C "${repo_dir}" remote add "${remote_name}" "${url}"
   fi
 
-  for branch in $branches; do
-    if [ "$branch" = 'HEAD' ]; then
+  for branch in ${branches}; do
+    if [ "${branch}" = 'HEAD' ]; then
       ## Resolve HEAD to a fully qualified ref locally first, so the
       ## push is not vulnerable to tag/branch name ambiguity (e.g. a
       ## tag named `master` shadowing the branch). symbolic-ref returns
       ## refs/heads/<branch> for an attached HEAD; for a detached HEAD
       ## it returns non-zero, which we treat as "skip with warning".
-      if ! resolved_head="$(git -C "$repo_dir" symbolic-ref HEAD 2>/dev/null)"; then
-        printf '%s\n' "warn: $repo_dir: HEAD detached, skipping HEAD push" >&2
+      if ! resolved_head="$(git -C "${repo_dir}" symbolic-ref HEAD 2>/dev/null)"; then
+        printf '%s\n' "warn: ${repo_dir}: HEAD detached, skipping HEAD push" >&2
         continue
       fi
-      [ "$verbose" = '1' ] && printf '%s\n' \
-        "push $resolved_head $repo_dir -> $remote_name"
-      git -C "$repo_dir" push -- "$remote_name" \
+      [ "${verbose}" = '1' ] && printf '%s\n' \
+        "push ${resolved_head} ${repo_dir} -> ${remote_name}"
+      git -C "${repo_dir}" push -- "${remote_name}" \
         "${resolved_head}:${resolved_head}" || \
         printf '%s\n' \
-          "warn: $repo_dir: $resolved_head push to $remote_name failed" >&2
+          "warn: ${repo_dir}: ${resolved_head} push to ${remote_name} failed" >&2
     else
       ## Validate the user-supplied branch name as a repo-name (same
       ## allowlist) before constructing a fully-qualified ref. This
       ## both blocks ref injection like `master HEAD` and prevents
       ## tag/branch ambiguity (we always use refs/heads/...).
-      if ! ghorg_validate_name "$branch" repo; then
-        printf '%s\n' "warn: $repo_dir: skipping invalid branch name" >&2
+      if ! ghorg_validate_name "${branch}" repo; then
+        printf '%s\n' "warn: ${repo_dir}: skipping invalid branch name" >&2
         continue
       fi
-      [ "$verbose" = '1' ] && printf '%s\n' "push $branch $repo_dir -> $remote_name"
-      git -C "$repo_dir" push -- "$remote_name" \
+      [ "${verbose}" = '1' ] && printf '%s\n' "push ${branch} ${repo_dir} -> ${remote_name}"
+      git -C "${repo_dir}" push -- "${remote_name}" \
         "refs/heads/${branch}:refs/heads/${branch}" || \
         printf '%s\n' \
-          "warn: $repo_dir: branch $branch push to $remote_name failed" >&2
+          "warn: ${repo_dir}: branch ${branch} push to ${remote_name} failed" >&2
     fi
   done
 
-  if [ "$push_tags" = '1' ]; then
-    [ "$verbose" = '1' ] && printf '%s\n' "push --tags $repo_dir -> $remote_name"
-    git -C "$repo_dir" push --tags -- "$remote_name" || \
-      printf '%s\n' "warn: $repo_dir: tag push to $remote_name failed" >&2
+  if [ "${push_tags}" = '1' ]; then
+    [ "${verbose}" = '1' ] && printf '%s\n' "push --tags ${repo_dir} -> ${remote_name}"
+    git -C "${repo_dir}" push --tags -- "${remote_name}" || \
+      printf '%s\n' "warn: ${repo_dir}: tag push to ${remote_name} failed" >&2
   fi
 }
 
@@ -218,8 +262,8 @@ main() {
   local candidate_count active repo_dir base_name candidate_dir
   local -a candidate_dirs
 
-  if [ ! -d "$source_dir" ]; then
-    printf '%s\n' "error: source dir does not exist: $source_dir" >&2
+  if [ ! -d "${source_dir}" ]; then
+    printf '%s\n' "error: source dir does not exist: ${source_dir}" >&2
     exit 1
   fi
 
@@ -230,43 +274,43 @@ main() {
   candidate_dirs=()
   while IFS= read -r -d '' candidate_dir; do
     [ -e "${candidate_dir}/.git" ] || continue
-    candidate_dirs+=( "$candidate_dir" )
-  done < <(find "$source_dir" -mindepth 1 -maxdepth 1 -type d -print0 \
+    candidate_dirs+=( "${candidate_dir}" )
+  done < <(find "${source_dir}" -mindepth 1 -maxdepth 1 -type d -print0 \
     | sort --zero-terminated --unique)
 
-  if [ -n "$include_re" ] || [ -n "$exclude_re" ]; then
+  if [ -n "${include_re}" ] || [ -n "${exclude_re}" ]; then
     ## Filter by basename, then re-prefix with source_dir.
     local -a filtered
     local kept_names cand_basename
     local names_in=''
     for candidate_dir in "${candidate_dirs[@]}"; do
-      cand_basename="$(basename -- "$candidate_dir")"
+      cand_basename="$(basename -- "${candidate_dir}")"
       names_in+="${cand_basename}"$'\n'
     done
-    kept_names="$(printf '%s' "$names_in" \
-      | ghorg_filter_names "$include_re" "$exclude_re")"
+    kept_names="$(printf '%s' "${names_in}" \
+      | ghorg_filter_names "${include_re}" "${exclude_re}")"
     filtered=()
     while IFS= read -r base_name; do
-      [ -z "$base_name" ] && continue
+      [ -z "${base_name}" ] && continue
       filtered+=( "${source_dir}/${base_name}" )
-    done <<< "$kept_names"
+    done <<< "${kept_names}"
     candidate_dirs=( "${filtered[@]}" )
   fi
 
   candidate_count="${#candidate_dirs[@]}"
-  if [ "$candidate_count" -eq 0 ]; then
-    printf '%s\n' "no git checkouts found under $source_dir" >&2
+  if [ "${candidate_count}" -eq 0 ]; then
+    printf '%s\n' "no git checkouts found under ${source_dir}" >&2
     return 0
   fi
 
-  printf '%s\n' "$candidate_count repos to process"
+  printf '%s\n' "${candidate_count} repos to process"
 
   active=0
   for repo_dir in "${candidate_dirs[@]}"; do
-    [ -z "$repo_dir" ] && continue
-    push_one "$repo_dir" &
+    [ -z "${repo_dir}" ] && continue
+    push_one "${repo_dir}" &
     active=$(( active + 1 ))
-    if [ "$active" -ge "$jobs" ]; then
+    if [ "${active}" -ge "${jobs}" ]; then
       wait -n || true
       active=$(( active - 1 ))
     fi

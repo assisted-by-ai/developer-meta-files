@@ -23,10 +23,10 @@ if [ "${CI:-}" != "true" ]; then
 fi
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
-FIXTURE_DIR="$(cd -- "$SCRIPT_DIR/../fixtures" && pwd)"
+FIXTURE_DIR="$(cd -- "${SCRIPT_DIR}/../fixtures" && pwd)"
 
 export GHORG_MOCK=1
-export GHORG_MOCK_DIR="$FIXTURE_DIR"
+export GHORG_MOCK_DIR="${FIXTURE_DIR}"
 
 ## GET_user fixture returns login=assisted-by-ai, matching target.
 ## Source org-ai-assisted has 2 selected repos (derivative-maker,
@@ -34,17 +34,17 @@ export GHORG_MOCK_DIR="$FIXTURE_DIR"
 ## derivative-maker. Expected: dry-run plans 1 new fork (helper-scripts).
 out="$(github-org-fork --dry-run org-ai-assisted assisted-by-ai 2>&1)"
 
-if ! grep --quiet -- 'DRY-RUN: fork org-ai-assisted/helper-scripts -> assisted-by-ai/helper-scripts' <<< "$out"; then
-  printf '%s\n' 'FAIL: expected fork plan for helper-scripts' "$out" >&2
+if ! grep --quiet -- 'DRY-RUN: fork org-ai-assisted/helper-scripts -> assisted-by-ai/helper-scripts' <<< "${out}"; then
+  printf '%s\n' 'FAIL: expected fork plan for helper-scripts' "${out}" >&2
   exit 1
 fi
-if grep --quiet -- 'DRY-RUN: fork org-ai-assisted/derivative-maker' <<< "$out"; then
+if grep --quiet -- 'DRY-RUN: fork org-ai-assisted/derivative-maker' <<< "${out}"; then
   printf '%s\n' \
-    'FAIL: derivative-maker already exists, should not be re-forked' "$out" >&2
+    'FAIL: derivative-maker already exists, should not be re-forked' "${out}" >&2
   exit 1
 fi
-if grep --quiet -- 'fork org-ai-assisted/old-archived\|fork org-ai-assisted/some-fork\|fork org-ai-assisted/private-thing' <<< "$out"; then
-  printf '%s\n' 'FAIL: filtered repos appeared in fork plan' "$out" >&2
+if grep --quiet -- 'fork org-ai-assisted/old-archived\|fork org-ai-assisted/some-fork\|fork org-ai-assisted/private-thing' <<< "${out}"; then
+  printf '%s\n' 'FAIL: filtered repos appeared in fork plan' "${out}" >&2
   exit 1
 fi
 

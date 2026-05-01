@@ -43,22 +43,22 @@ readonly target_org='octokit'
 ## not surface a false failure.
 status="$(curl --silent --max-time 10 --output /tmp/probe-rl.json \
    --write-out '%{http_code}' 'https://api.github.com/rate_limit')"
-if [ "$status" != '200' ]; then
-   printf '%s\n' "skip: rate_limit endpoint HTTP $status; cannot probe." >&2
+if [ "${status}" != '200' ]; then
+   printf '%s\n' "skip: rate_limit endpoint HTTP ${status}; cannot probe." >&2
    exit 0
 fi
 remaining="$(jq --raw-output -- '.resources.core.remaining // 0' /tmp/probe-rl.json)"
-if [ "$remaining" -lt 5 ]; then
+if [ "${remaining}" -lt 5 ]; then
    printf '%s\n' \
-      "skip: unauth core quota at $remaining (need >= 5); rate-limit window full." >&2
+      "skip: unauth core quota at ${remaining} (need >= 5); rate-limit window full." >&2
    exit 0
 fi
-printf '%s\n' "unauth core quota: $remaining"
+printf '%s\n' "unauth core quota: ${remaining}"
 
 ## Tooling pre-flight.
 for cmd in github-org-clone curl jq sanitize-string; do
-   if ! command -v "$cmd" >/dev/null 2>&1; then
-      printf '%s\n' "error: $cmd not on PATH." >&2
+   if ! command -v "${cmd}" >/dev/null 2>&1; then
+      printf '%s\n' "error: ${cmd} not on PATH." >&2
       exit 1
    fi
 done
@@ -75,22 +75,22 @@ out_dir="$(mktemp --directory)"
 ## (not an inline command string) so the trap is auditable as a
 ## named callable rather than a quoted snippet.
 probe_live_unauth_cleanup_out_dir() {
-   safe-rm --recursive --force -- "$out_dir"
+   safe-rm --recursive --force -- "${out_dir}"
 }
 trap probe_live_unauth_cleanup_out_dir EXIT
 
 printf '%s\n' ""
-printf '%s\n' "=== github-org-clone --dry-run $target_org ==="
-out="$(github-org-clone --dry-run "$target_org" "$out_dir/clone" 2>&1)"
-printf '%s\n' "$out"
+printf '%s\n' "=== github-org-clone --dry-run ${target_org} ==="
+out="$(github-org-clone --dry-run "${target_org}" "${out_dir}/clone" 2>&1)"
+printf '%s\n' "${out}"
 
 ## Sanity check: dry-run output should include the "N repos to process"
 ## header and at least one "DRY-RUN: clone" line.
-if ! grep --quiet --extended-regexp -- '^[0-9]+ repos to process' <<< "$out"; then
+if ! grep --quiet --extended-regexp -- '^[0-9]+ repos to process' <<< "${out}"; then
    printf '%s\n' 'FAIL: expected "N repos to process" header in output' >&2
    exit 1
 fi
-if ! grep --quiet -- 'DRY-RUN: clone' <<< "$out"; then
+if ! grep --quiet -- 'DRY-RUN: clone' <<< "${out}"; then
    printf '%s\n' 'FAIL: expected at least one "DRY-RUN: clone" line' >&2
    exit 1
 fi

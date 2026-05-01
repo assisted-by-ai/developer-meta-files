@@ -22,10 +22,10 @@ if [ "${CI:-}" != "true" ]; then
 fi
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
-FIXTURE_DIR="$(cd -- "$SCRIPT_DIR/../fixtures" && pwd)"
+FIXTURE_DIR="$(cd -- "${SCRIPT_DIR}/../fixtures" && pwd)"
 
 export GHORG_MOCK=1
-export GHORG_MOCK_DIR="$FIXTURE_DIR"
+export GHORG_MOCK_DIR="${FIXTURE_DIR}"
 
 out="$(github-org-clone --dry-run org-ai-assisted /tmp/clone-dryrun-out)"
 
@@ -37,21 +37,21 @@ unexpected=( old-archived some-fork private-thing )
 
 fail=0
 for repo in "${expected_repos[@]}"; do
-  if ! grep --quiet -- "DRY-RUN: clone .*${repo}\.git" <<< "$out"; then
-    printf '%s\n' "FAIL: expected $repo in dry-run output" >&2
+  if ! grep --quiet -- "DRY-RUN: clone .*${repo}\.git" <<< "${out}"; then
+    printf '%s\n' "FAIL: expected ${repo} in dry-run output" >&2
     fail=1
   fi
 done
 for repo in "${unexpected[@]}"; do
-  if grep --quiet -- "DRY-RUN: clone .*${repo}\.git" <<< "$out"; then
-    printf '%s\n' "FAIL: $repo should be filtered out" >&2
+  if grep --quiet -- "DRY-RUN: clone .*${repo}\.git" <<< "${out}"; then
+    printf '%s\n' "FAIL: ${repo} should be filtered out" >&2
     fail=1
   fi
 done
 
-if ! grep --quiet -- '^2 repos to process' <<< "$out"; then
+if ! grep --quiet -- '^2 repos to process' <<< "${out}"; then
   printf '%s\n' 'FAIL: expected "2 repos to process" header' >&2
   fail=1
 fi
 
-exit "$fail"
+exit "${fail}"

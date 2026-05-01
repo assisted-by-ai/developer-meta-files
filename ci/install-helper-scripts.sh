@@ -37,6 +37,6 @@ fi
 readonly clone_dir='/tmp/helper-scripts-install'
 readonly upstream_url='https://github.com/Kicksecure/helper-scripts.git'
 
-git clone --depth=1 --branch=master -- "$upstream_url" "$clone_dir"
-cd -- "$clone_dir"
+git clone --depth=1 --branch=master -- "${upstream_url}" "${clone_dir}"
+cd -- "${clone_dir}"
 GENMKFILE_DEBUG=1 genmkfile install
