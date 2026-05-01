@@ -85,10 +85,12 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     --include)
+      [ "$#" -ge 2 ] || { printf '%s\n' "missing value for --include" >&2; exit 64; }
       include_re="$2"
       shift 2
       ;;
     --exclude)
+      [ "$#" -ge 2 ] || { printf '%s\n' "missing value for --exclude" >&2; exit 64; }
       exclude_re="$2"
       shift 2
       ;;
@@ -105,6 +107,7 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     --actions)
+      [ "$#" -ge 2 ] || { printf '%s\n' "missing value for --actions" >&2; exit 64; }
       case "$2" in
         enable|disable|leave)
           actions_state="$2"
@@ -117,6 +120,7 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --workflow-perms)
+      [ "$#" -ge 2 ] || { printf '%s\n' "missing value for --workflow-perms" >&2; exit 64; }
       case "$2" in
         read|write|leave)
           workflow_perms="$2"
@@ -163,6 +167,8 @@ source_owner="$1"
 target_owner="$2"
 
 ghorg_require_deps
+ghorg_validate_name "${source_owner}" user
+ghorg_validate_name "${target_owner}" user
 
 ## POST /repos/{owner}/{repo}/forks. The `organization` body field
 ## applies only when the target is an Organization; for a User it must

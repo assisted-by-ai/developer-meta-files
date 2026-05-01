@@ -75,6 +75,7 @@ jobs:
       - name: Install helper-scripts (provides sanitize-string)
         env:
           CI: "true"
+          HELPER_SCRIPTS_REF: ${{ vars.HELPER_SCRIPTS_REF }}
         run: ./ci/install-helper-scripts.sh
 
       - name: Install developer-meta-files

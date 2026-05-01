@@ -75,6 +75,7 @@ EOF
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --branches)
+      [ "$#" -ge 2 ] || { printf '%s\n' "missing value for --branches" >&2; exit 64; }
       branches="$2"
       shift 2
       ;;
@@ -83,14 +84,17 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     --remote-name)
+      [ "$#" -ge 2 ] || { printf '%s\n' "missing value for --remote-name" >&2; exit 64; }
       remote_name="$2"
       shift 2
       ;;
     --include)
+      [ "$#" -ge 2 ] || { printf '%s\n' "missing value for --include" >&2; exit 64; }
       include_re="$2"
       shift 2
       ;;
     --exclude)
+      [ "$#" -ge 2 ] || { printf '%s\n' "missing value for --exclude" >&2; exit 64; }
       exclude_re="$2"
       shift 2
       ;;
@@ -103,6 +107,7 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     --jobs)
+      [ "$#" -ge 2 ] || { printf '%s\n' "missing value for --jobs" >&2; exit 64; }
       jobs="$2"
       shift 2
       ;;
@@ -146,6 +151,16 @@ target_owner="$2"
 [ -z "${remote_name}" ] && remote_name="${target_owner}"
 
 ghorg_require_deps
+ghorg_validate_name "${target_owner}" user
+ghorg_validate_name "${remote_name}" user
+if ! [[ "${jobs}" =~ ^[1-9][0-9]*$ ]]; then
+  printf '%s\n' "invalid --jobs value: '${jobs}' (expected positive integer)" >&2
+  exit 64
+fi
+if [ "${jobs}" -gt 64 ]; then
+  printf '%s\n' "invalid --jobs value: '${jobs}' (max 64)" >&2
+  exit 64
+fi
 
 remote_url() {
   local repo

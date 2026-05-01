@@ -90,10 +90,12 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     --include)
+      [ "$#" -ge 2 ] || { printf '%s\n' "missing value for --include" >&2; exit 64; }
       include_re="$2"
       shift 2
       ;;
     --exclude)
+      [ "$#" -ge 2 ] || { printf '%s\n' "missing value for --exclude" >&2; exit 64; }
       exclude_re="$2"
       shift 2
       ;;
@@ -110,6 +112,7 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     --jobs)
+      [ "$#" -ge 2 ] || { printf '%s\n' "missing value for --jobs" >&2; exit 64; }
       jobs="$2"
       shift 2
       ;;
@@ -148,6 +151,15 @@ source_org="$1"
 dest_dir="${2:-.}"
 
 ghorg_require_deps
+ghorg_validate_name "${source_org}" user
+if ! [[ "${jobs}" =~ ^[1-9][0-9]*$ ]]; then
+  printf '%s\n' "invalid --jobs value: '${jobs}' (expected positive integer)" >&2
+  exit 64
+fi
+if [ "${jobs}" -gt 64 ]; then
+  printf '%s\n' "invalid --jobs value: '${jobs}' (max 64)" >&2
+  exit 64
+fi
 
 repo_url() {
   local repo

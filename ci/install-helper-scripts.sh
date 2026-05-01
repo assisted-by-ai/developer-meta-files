@@ -33,10 +33,36 @@ if ! command -v genmkfile >/dev/null 2>&1; then
       'error: genmkfile not on PATH; run ci/install-genmkfile.sh first.' >&2
    exit 1
 fi
+if ! command -v safe-rm >/dev/null 2>&1; then
+   printf '%s\n' \
+      'error: safe-rm not on PATH; required for secure cleanup of temporary clone directory.' >&2
+   exit 1
+fi
 
-readonly clone_dir='/tmp/helper-scripts-install'
 readonly upstream_url='https://github.com/Kicksecure/helper-scripts.git'
+readonly helper_scripts_ref="${HELPER_SCRIPTS_REF:-}"
+clone_dir=''
 
-git clone --depth=1 --branch=master -- "${upstream_url}" "${clone_dir}"
+if [ -z "${helper_scripts_ref}" ]; then
+   printf '%s\n' \
+      'error: HELPER_SCRIPTS_REF is empty.' \
+      '       Set it to an immutable 40-hex git commit SHA to avoid mutable-branch supply-chain risk.' >&2
+   exit 1
+fi
+if ! [[ "${helper_scripts_ref}" =~ ^[0-9a-f]{40}$ ]]; then
+   printf '%s\n' \
+      "error: HELPER_SCRIPTS_REF must be a 40-hex commit SHA, got '${helper_scripts_ref}'." >&2
+   exit 1
+fi
+
+clone_dir="$(mktemp -d)"
+cleanup_clone_dir() {
+   [ -n "${clone_dir}" ] || return 0
+   safe-rm --recursive --force -- "${clone_dir}"
+}
+trap cleanup_clone_dir EXIT
+
+git clone --depth=1 --no-tags -- "${upstream_url}" "${clone_dir}"
 cd -- "${clone_dir}"
+git checkout --detach -- "${helper_scripts_ref}"
 GENMKFILE_DEBUG=1 genmkfile install

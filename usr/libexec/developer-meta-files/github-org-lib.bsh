@@ -79,12 +79,22 @@ ghorg_authenticated_user_cached=''
 ## path (return, errexit, fall-through), so an enclosing `set -x`
 ## cannot leak the secret regardless of how this function exits.
 ghorg_token() {
-  local token_file mode
+  local token_file mode token
   local -
 
   set +x
   if [ -n "${GITHUB_TOKEN:-}" ]; then
-    printf '%s' "${GITHUB_TOKEN}"
+    token="${GITHUB_TOKEN}"
+    if [ "${#token}" -gt 255 ]; then
+      printf '%s\n' "error: GITHUB_TOKEN is longer than 255 bytes; refusing suspicious token format" >&2
+      return 1
+    fi
+    if ! [[ "${token}" =~ ^[A-Za-z0-9_]+$ ]]; then
+      printf '%s\n' \
+        'error: GITHUB_TOKEN has disallowed characters; refusing unsafe token format' >&2
+      return 1
+    fi
+    printf '%s' "${token}"
     return 0
   fi
   token_file="${GHORG_TOKEN_FILE:-${XDG_CONFIG_HOME:-${HOME}/.config}/github-token}"
@@ -108,12 +118,27 @@ ghorg_token() {
   fi
   mode="$(stat -c '%a' -- "${token_file}" 2>/dev/null \
     || stat -f '%Lp' -- "${token_file}" 2>/dev/null \
-    || printf '%s' '600')"
+    || true)"
+  if [ -z "${mode}" ]; then
+    printf '%s\n' \
+      "error: unable to determine permissions for '${token_file}'; refusing to read token" >&2
+    return 1
+  fi
   if [ "${mode}" != '600' ] && [ "${mode}" != '400' ]; then
     printf '%s\n' "error: '${token_file}' permissions are '${mode}', expected 600 or 400" >&2
     return 1
   fi
-  head --lines=1 -- "${token_file}" | tr -d '\r\n'
+  token="$(head --lines=1 -- "${token_file}" | tr -d '\r\n')"
+  if [ "${#token}" -gt 255 ]; then
+    printf '%s\n' "error: token file first line is longer than 255 bytes; refusing suspicious token format" >&2
+    return 1
+  fi
+  if ! [[ "${token}" =~ ^[A-Za-z0-9_]+$ ]]; then
+    printf '%s\n' \
+      'error: token file contains disallowed token characters; refusing unsafe token format' >&2
+    return 1
+  fi
+  printf '%s' "${token}"
 }
 
 ## Verifies curl, jq, and sanitize-string are present. sanitize-string
@@ -221,6 +246,16 @@ ghorg_compute_backoff_seconds() {
     seconds="${GHORG_MAX_BACKOFF_SECONDS}"
   fi
   printf '%s' "${seconds}"
+}
+
+ghorg_require_uint() {
+  local label value
+  label="$1"
+  value="$2"
+  if ! [[ "${value}" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "error: ${label} must be an unsigned integer, got '${value}'" >&2
+    return 1
+  fi
 }
 
 ## Parse Retry-After or X-RateLimit-Reset out of a header dump file.
@@ -356,7 +391,22 @@ ghorg_api() {
     return 0
   fi
 
-  token="$(ghorg_token 2>/dev/null)" || token=''
+  if token="$(ghorg_token 2>/dev/null)"; then
+    :
+  else
+    ## Fail closed when auth was explicitly configured but invalid:
+    ## silently downgrading to anonymous requests can hide bad token
+    ## state and produce confusing partial behavior.
+    if [ -n "${GITHUB_TOKEN:-}" ] \
+      || [ -e "${GHORG_TOKEN_FILE:-${XDG_CONFIG_HOME:-${HOME}/.config}/github-token}" ]; then
+      printf '%s\n' \
+        'error: GitHub token configured but invalid/unreadable; refusing anonymous fallback' >&2
+      return 1
+    fi
+    token=''
+  fi
+  ghorg_require_uint 'GHORG_MAX_RETRIES' "${GHORG_MAX_RETRIES:-3}" || return 1
+  ghorg_require_uint 'GHORG_MAX_BACKOFF_SECONDS' "${GHORG_MAX_BACKOFF_SECONDS:-3600}" || return 1
   hdr_file="$(mktemp)"
   trap ghorg_api_cleanup_hdr_file RETURN
 
