@@ -66,7 +66,45 @@
 ##     used in past CVEs to read local files or run shell commands
 ##     when a hostile upstream redirects a sub-fetch.
 
+## ============================================================================
+## Globals
+## ============================================================================
+## All script-level globals are declared here so a reader can see at a glance
+## what state the lib carries. User-tunable knobs use ${VAR:-DEFAULT} so callers
+## can override via env; pure constants are bare assignments.
+
+## API base URL. Override for testing against a captured-replay server.
 GHORG_API="${GHORG_API:-https://api.github.com}"
+
+## Maximum lengths for various GitHub-supplied identifiers, per documented
+## GitHub limits. Used both as rejection thresholds (via ghorg_validate_name)
+## and as truncation caps for safe display via ghorg_safe_print.
+GHORG_MAX_REPO_NAME_LEN=100
+GHORG_MAX_USER_LOGIN_LEN=39
+GHORG_MAX_DISPLAY_LEN=256
+
+## Retry / backoff knobs for ghorg_api on rate-limit (HTTP 429 / 403 with
+## "rate limit" body) and 5xx. ghorg_compute_backoff_seconds doubles per
+## attempt: 30s, 60s, 120s, 240s ... clamped at GHORG_MAX_BACKOFF_SECONDS.
+GHORG_MAX_RETRIES="${GHORG_MAX_RETRIES:-3}"
+GHORG_MAX_BACKOFF_SECONDS="${GHORG_MAX_BACKOFF_SECONDS:-3600}"
+
+## Hostile-API resource caps. Each one bounds a vector by which a
+## misbehaving or compromised endpoint could exhaust local resources or
+## smuggle oversized data through a downstream sink. See THREAT MODEL.
+GHORG_MAX_PAGES="${GHORG_MAX_PAGES:-100}"
+GHORG_MAX_REDIRS="${GHORG_MAX_REDIRS:-5}"
+GHORG_MAX_ID_LEN=20
+
+## Cache of <owner> -> "User"|"Organization". Populated by ghorg_account_type
+## on first lookup; read by every code path that branches on account type.
+declare -g -A ghorg_account_type_cache=()
+
+## Cached login of the user whose token is in use. Populated by
+## ghorg_authenticated_user on first call. Empty until the first call.
+ghorg_authenticated_user_cached=''
+
+## ============================================================================
 
 ## Resolves a GitHub token from $GITHUB_TOKEN or, failing that, from
 ## ~/.config/github-token. The file must be a regular file (not a
@@ -85,6 +123,7 @@ GHORG_API="${GHORG_API:-https://api.github.com}"
 ghorg_token() {
   local token_file mode
   local -
+
   set +x
   if [ -n "${GITHUB_TOKEN:-}" ]; then
     printf '%s' "$GITHUB_TOKEN"
@@ -128,6 +167,7 @@ ghorg_token() {
 ## terminal escapes, HTML, or oversized payloads through.
 ghorg_require_deps() {
   local cmd
+
   for cmd in curl jq sanitize-string; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
       printf '%s\n' "error: required command not found: $cmd" >&2
@@ -135,13 +175,6 @@ ghorg_require_deps() {
     fi
   done
 }
-
-## Maximum lengths for various GitHub-supplied identifiers, per
-## documented GitHub limits. Used both as rejection thresholds (via
-## ghorg_validate_name) and as truncation caps for safe display.
-GHORG_MAX_REPO_NAME_LEN=100
-GHORG_MAX_USER_LOGIN_LEN=39
-GHORG_MAX_DISPLAY_LEN=256
 
 ## Prints an untrusted byte sequence safely for terminal display via
 ## sanitize-string from helper-scripts (which strips ANSI escapes,
@@ -156,8 +189,10 @@ GHORG_MAX_DISPLAY_LEN=256
 ## Args: $1 = max length (integer or "nolimit"), $2 = string
 ghorg_safe_print() {
   local max s
+
   max="${1:-$GHORG_MAX_DISPLAY_LEN}"
   s="${2:-}"
+
   sanitize-string -- "$max" "$s"
 }
 
@@ -188,8 +223,10 @@ ghorg_safe_print() {
 ## Return: 0 = valid, non-zero = invalid (error logged)
 ghorg_validate_name() {
   local name kind max_len safe_name
+
   name="$1"
   kind="${2:-repo}"
+
   case "$kind" in
     repo) max_len="$GHORG_MAX_REPO_NAME_LEN" ;;
     user) max_len="$GHORG_MAX_USER_LOGIN_LEN" ;;
@@ -227,34 +264,6 @@ ghorg_validate_name() {
   return 0
 }
 
-## Maximum number of automatic retries on transient failures
-## (rate-limit, 5xx). Each retry waits longer than the last per
-## ghorg_compute_backoff_seconds.
-GHORG_MAX_RETRIES="${GHORG_MAX_RETRIES:-3}"
-## Hard cap on a single backoff sleep, in seconds. If the API tells us
-## to wait longer than this (e.g. via X-RateLimit-Reset on a quiet hour
-## boundary), refuse to wait silently and let the caller decide.
-GHORG_MAX_BACKOFF_SECONDS="${GHORG_MAX_BACKOFF_SECONDS:-3600}"
-## Hard cap on pagination depth for ghorg_list_repos. A hostile or
-## misbehaving API could keep returning 100 results per page forever;
-## without this cap the pager loop would run until the local process
-## ran out of memory or the rate-limit budget. 100 pages at 100 repos
-## per page = 10,000 repos, well above any real org's repo count.
-GHORG_MAX_PAGES="${GHORG_MAX_PAGES:-100}"
-## Maximum permitted redirects on a single API call. The GitHub REST
-## API does not normally redirect within itself; bounding this guards
-## against a hostile / MITM'd response that injects a redirect chain
-## to leak request URLs to an attacker-controlled host. (Modern curl
-## already strips the Authorization header on cross-host redirect by
-## default, so the token itself does not leak; this caps the chain.)
-GHORG_MAX_REDIRS="${GHORG_MAX_REDIRS:-5}"
-## Hard cap on the byte length of any numeric ID extracted from an
-## API response before that ID is interpolated into a URL path. The
-## ^[0-9]+$ regex check would otherwise accept a string of arbitrary
-## length, giving a hostile API a way to push a 10,000-byte URL
-## fragment through.
-GHORG_MAX_ID_LEN=20
-
 ## Returns a backoff duration in seconds for a given retry attempt
 ## (0-indexed). 30s, 60s, 120s, 240s ... bounded by
 ## GHORG_MAX_BACKOFF_SECONDS. Used as the floor when no Retry-After or
@@ -262,8 +271,10 @@ GHORG_MAX_ID_LEN=20
 ## response.
 ghorg_compute_backoff_seconds() {
   local attempt seconds
+
   attempt="${1:-0}"
   seconds=$(( 30 * (1 << attempt) ))
+
   if [ "$seconds" -gt "$GHORG_MAX_BACKOFF_SECONDS" ]; then
     seconds="$GHORG_MAX_BACKOFF_SECONDS"
   fi
@@ -280,9 +291,12 @@ ghorg_compute_backoff_seconds() {
 ## is a gawk extension that mawk (the default in many Debian-based
 ## CI images) does not honor.
 ghorg_parse_rate_limit_wait() {
-  local hdr_file="$1"
+  local hdr_file retry_after reset now wait
+
+  hdr_file="$1"
+
   [ -r "$hdr_file" ] || return 0
-  local retry_after reset
+
   ## Trailing `|| true` keeps a missing header (grep exit 1) from
   ## propagating through pipefail + inherit_errexit when callers run
   ## under strict shell options.
@@ -299,7 +313,6 @@ ghorg_parse_rate_limit_wait() {
     | sed -- 's/^[^:]*:[[:space:]]*//' \
     | tr -d -- '[:cntrl:]' || true)"
   if [[ "$reset" =~ ^[0-9]+$ ]]; then
-    local now wait
     now="$(date -u +%s)"
     wait=$(( reset - now + 5 ))   ## small buffer so we don't wake too early
     if [ "$wait" -gt 0 ]; then
@@ -329,11 +342,13 @@ ghorg_parse_rate_limit_wait() {
 ## state.
 ghorg_mock_dispatch() {
   local method path key clean_path fixture
+
   method="$1"
   path="$2"
   clean_path="${path%%\?*}"        ## strip ?query=...
   key="${method}${clean_path//\//_}"
   fixture="${GHORG_MOCK_DIR}/${key}"
+
   if [ -r "$fixture" ]; then
     cat -- "$fixture"
     return 0
@@ -384,12 +399,16 @@ ghorg_api_cleanup_hdr_file() {
 ghorg_api() {
   ## Suspend xtrace so the token cannot be leaked via an enclosing
   ## `set -x`. `local -; set +x` restores caller's options on exit.
+  local method path body token hdr_file
+  local attempt max status result wait body_text
+  local -a args
   local -
-  set +x
-  local method path body
+
   method="$1"
   path="$2"
   body="${3:-}"
+
+  set +x
 
   ## Mock mode short-circuits everything else. No retry needed: a test
   ## fixture either exists or it does not.
@@ -398,15 +417,13 @@ ghorg_api() {
     return 0
   fi
 
-  local token
   token="$(ghorg_token 2>/dev/null)" || token=''
-
-  local hdr_file
   hdr_file="$(mktemp)"
+
   ## Best-effort cleanup; will fire on every return path under errexit.
   trap ghorg_api_cleanup_hdr_file RETURN
 
-  local args=(
+  args=(
     --silent
     --show-error
     --location
@@ -426,9 +443,9 @@ ghorg_api() {
     args+=( --header 'Content-Type: application/json' --data "$body" )
   fi
 
-  local attempt max status result wait body_text
   attempt=0
   max="${GHORG_MAX_RETRIES:-3}"
+
   while true ; do
     true > "$hdr_file"
     if [ -n "$token" ]; then
@@ -490,13 +507,14 @@ ghorg_status_of() { printf '%s\n' "$1" | tail --lines=1 | sed -- 's/^HTTP_STATUS
 ghorg_body_of()   { printf '%s\n' "$1" | sed -- '$d'; }
 
 ## Probes whether $1 is a User or an Organization on GitHub. Result is
-## cached in ghorg_account_type_cache so repeated lookups don't burn
-## API quota. Echoes "User" or "Organization" on success; sets
-## non-zero exit on lookup failure.
-declare -g -A ghorg_account_type_cache=()
+## cached in ghorg_account_type_cache (declared at top of file) so
+## repeated lookups don't burn API quota. Echoes "User" or
+## "Organization" on success; non-zero exit on lookup failure.
 ghorg_account_type() {
   local owner result status body type safe_owner safe_type
+
   owner="$1"
+
   ## Validate caller-supplied owner before placing it into a URL path
   ## or cache key. Owner may have come from a CLI argument, but it
   ## still flows into URLs, so we treat it like any other name.
@@ -547,12 +565,14 @@ ghorg_list_repos() {
   local account_type api_base auth_user jq_filter
   local page result body status count name safe_owner
   local -a jq_clauses
+
   owner="$1"
   inc_private="$2"
   inc_archived="$3"
   inc_forks="$4"
   safe_owner="$(ghorg_safe_print "$GHORG_MAX_USER_LOGIN_LEN" "$owner")"
   account_type="$(ghorg_account_type "$owner")" || return 1
+
   case "$account_type" in
     Organization) api_base="/orgs/${owner}/repos?per_page=100&type=all" ;;
     User)
@@ -641,8 +661,10 @@ ghorg_list_repos() {
 ## Args: $1 = include regex (POSIX ERE) or '', $2 = exclude regex or ''
 ghorg_filter_names() {
   local include_re exclude_re
+
   include_re="$1"
   exclude_re="$2"
+
   if [ -n "$include_re" ]; then
     grep --extended-regexp -- "$include_re" || true
   else
@@ -667,12 +689,16 @@ ghorg_filter_names() {
 ##   2 - lookup failed for any other reason (HTTP non-200/404, network)
 ghorg_repo_lookup() {
   local owner repo result status safe_owner safe_repo
+
   owner="$1"
   repo="$2"
+
   ghorg_validate_name "$owner" user || return 2
   ghorg_validate_name "$repo" repo || return 2
+
   result="$(ghorg_api GET "/repos/${owner}/${repo}")" || return 2
   status="$(ghorg_status_of "$result")"
+
   case "$status" in
     200) return 0 ;;
     404) return 1 ;;
@@ -698,12 +724,16 @@ ghorg_repo_lookup() {
 ghorg_repo_parent() {
   local owner repo result status body parent p_owner p_repo
   local safe_owner safe_repo
+
   owner="$1"
   repo="$2"
+
   ghorg_validate_name "$owner" user || return 1
   ghorg_validate_name "$repo" repo || return 1
+
   result="$(ghorg_api GET "/repos/${owner}/${repo}")" || return 1
   status="$(ghorg_status_of "$result")"
+
   if [ "$status" != '200' ]; then
     safe_owner="$(ghorg_safe_print "$GHORG_MAX_USER_LOGIN_LEN" "$owner")"
     safe_repo="$(ghorg_safe_print "$GHORG_MAX_REPO_NAME_LEN" "$repo")"
@@ -728,16 +758,18 @@ ghorg_repo_parent() {
 }
 
 ## Returns the login of the user whose token is being used. Cached
-## across calls. Required before any operation whose semantics depend
-## on the authenticated user matching a target user (forks into a
-## User account, listing /user/repos for private repos, etc.).
-ghorg_authenticated_user_cached=''
+## across calls in ghorg_authenticated_user_cached (declared at top
+## of file). Required before any operation whose semantics depend on
+## the authenticated user matching a target user (forks into a User
+## account, listing /user/repos for private repos, etc.).
 ghorg_authenticated_user() {
   local result status body login
+
   if [ -n "$ghorg_authenticated_user_cached" ]; then
     printf '%s' "$ghorg_authenticated_user_cached"
     return 0
   fi
+
   result="$(ghorg_api GET "/user")" || return 1
   status="$(ghorg_status_of "$result")"
   if [ "$status" != '200' ]; then

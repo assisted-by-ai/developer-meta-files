@@ -121,9 +121,13 @@ ghorg_require_deps
 fork_one() {
   local repo target_type body auth_user result status
   local safe_target safe_auth
+
   repo="$1"
+
   ghorg_validate_name "$repo" repo || return 1
+
   target_type="$(ghorg_account_type "$target_owner")" || return 1
+
   if [ "$target_type" = 'Organization' ]; then
     body="$(jq -n --arg org "$target_owner" -- \
       '{organization: $org, default_branch_only: false}')"
@@ -161,9 +165,12 @@ fork_one() {
 ## to do (rename, archive, or accept).
 check_collision() {
   local repo parent expected safe_repo safe_parent safe_expected
+
   repo="$1"
+
   parent="$(ghorg_repo_parent "$target_owner" "$repo")" || return 0
   expected="${source_owner}/${repo}"
+
   if [ -n "$parent" ] && [ "$parent" != "$expected" ]; then
     safe_repo="$(ghorg_safe_print "$GHORG_MAX_REPO_NAME_LEN" "$repo")"
     safe_parent="$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$parent")"
@@ -178,6 +185,7 @@ check_collision() {
 ## flags were passed.
 configure_one() {
   local repo patch enabled body result status
+
   repo="$1"
 
   ## Repo settings PATCH only sent if at least one toggle was requested.
@@ -236,6 +244,7 @@ configure_one() {
 
 main() {
   local target_type auth_user source_repos target_repos missing to_configure repo
+
   printf '%s\n' "source: $source_owner -> target: $target_owner"
 
   ## If the target is a User, GitHub will fork to the authenticated

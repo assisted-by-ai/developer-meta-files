@@ -104,9 +104,11 @@ api_path="/orgs/${org}/actions/permissions/fork-pr-contributor-approval"
 
 current_policy() {
   local result status body safe_body
+
   result="$(ghorg_api GET "$api_path")" || return 1
   status="$(ghorg_status_of "$result")"
   body="$(ghorg_body_of "$result")"
+
   if [ "$status" != '200' ]; then
     safe_body="$(ghorg_safe_print 512 "$body")"
     printf '%s\n' "error: GET $api_path: HTTP $status" "$safe_body" >&2

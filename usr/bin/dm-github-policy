@@ -199,10 +199,12 @@ record_skip() {
 ## end-of-run summary then shows the totals.
 api_call() {
    local label method path body result status response_body safe_body
+
    label="$1"
    method="$2"
    path="$3"
    body="${4:-}"
+
    if [ "$dry_run" = '1' ]; then
       printf '%s\n' "DRY-RUN: $label -> $method $path"
       api_record dry
@@ -238,9 +240,11 @@ api_call() {
 ## $3 = JSON body (must include the same name).
 upsert_org_ruleset() {
    local org name body result status existing_id safe_id
+
    org="$1"
    name="$2"
    body="$3"
+
    if [ "$dry_run" = '1' ]; then
       printf '%s\n' "DRY-RUN: $org: upsert ruleset $name"
       return 0
@@ -293,6 +297,7 @@ apply_code_security_config() {
    local org config_body list_result list_status existing_id
    local create_result create_status attach_body default_body
    local list_body list_safe_body create_body create_safe_body safe_id
+
    org="$1"
 
    config_body="$(jq -n --arg name "$CODE_SEC_CONFIG_NAME" -- '{
@@ -309,10 +314,10 @@ apply_code_security_config() {
    }')"
 
    if [ "$dry_run" = '1' ]; then
-      printf '%s\n' \
-         "DRY-RUN: $org: upsert code-security configuration $CODE_SEC_CONFIG_NAME" \
-         "DRY-RUN: $org: attach code-security configuration scope=all" \
-         "DRY-RUN: $org: set code-security configuration default_for_new_repos=all"
+      printf '%s\n' "\
+DRY-RUN: $org: upsert code-security configuration $CODE_SEC_CONFIG_NAME
+DRY-RUN: $org: attach code-security configuration scope=all
+DRY-RUN: $org: set code-security configuration default_for_new_repos=all"
       api_record dry; api_record dry; api_record dry
       return 0
    fi
@@ -324,9 +329,9 @@ apply_code_security_config() {
    if [ "$list_status" != '200' ]; then
       list_body="$(ghorg_body_of "$list_result")"
       list_safe_body="$(ghorg_safe_print 512 "$list_body")"
-      printf '%s\n' \
-         "warn: $org: list code-security configurations [$list_status]" \
-         "$list_safe_body" >&2
+      printf '%s\n' "\
+warn: $org: list code-security configurations [$list_status]
+$list_safe_body" >&2
       api_record warn
       return 1
    fi
@@ -364,9 +369,9 @@ apply_code_security_config() {
          *)
             create_body="$(ghorg_body_of "$create_result")"
             create_safe_body="$(ghorg_safe_print 512 "$create_body")"
-            printf '%s\n' \
-               "warn: $org: create code-security configuration [$create_status]" \
-               "$create_safe_body" >&2
+            printf '%s\n' "\
+warn: $org: create code-security configuration [$create_status]
+$create_safe_body" >&2
             api_record warn
             return 1
             ;;
@@ -393,8 +398,11 @@ apply_code_security_config() {
 ## branch and tag rulesets, PAT and App SKIPs.
 apply_org_policy() {
    local org body branch_ruleset tag_ruleset
+
    org="$1"
-   printf '\n%s\n' "=== org policy: $org ==="
+
+   printf '%s\n' ""
+   printf '%s\n' "=== org policy: $org ==="
 
    ## 1. Fork-PR contributor approval = all_external_contributors.
    body="$(jq -n -- '{approval_policy: "all_external_contributors"}')"
@@ -478,9 +486,9 @@ apply_org_policy() {
    ##     do not have 2FA turned on will REMOVE those members. The
    ##     --audit mode lists members lacking 2FA so the operator can
    ##     confirm membership state before flipping the switch.
-   printf '%s\n' \
-      "skip: $org: 2FA enforcement must be set via UI - see" \
-      "       https://github.com/organizations/${org}/settings/security"
+   printf '%s\n' "\
+skip: $org: 2FA enforcement must be set via UI - see
+       https://github.com/organizations/${org}/settings/security"
    record_skip
 
    ## 5+6. Code security via the modern Code Security Configurations
@@ -580,9 +588,9 @@ apply_org_policy() {
    ## TODO: replace with real API calls when GitHub publishes stable
    ## REST endpoints for the PAT policy toggles. Reference:
    ## https://github.com/orgs/${org}/settings/personal-access-tokens
-   printf '%s\n' \
-      "skip: $org: PAT policy toggles must be set via UI - see" \
-      "       https://github.com/organizations/${org}/settings/personal-access-tokens"
+   printf '%s\n' "\
+skip: $org: PAT policy toggles must be set via UI - see
+       https://github.com/organizations/${org}/settings/personal-access-tokens"
    record_skip
    ## Sample of what would be set if a stable REST surface existed:
    # body="$(jq -n '{
@@ -603,10 +611,10 @@ apply_org_policy() {
    ## REST endpoints. Reference:
    ## https://github.com/organizations/${org}/settings/oauth_application_policy
    ## https://github.com/organizations/${org}/settings/installations
-   printf '%s\n' \
-      "skip: $org: GitHub App / OAuth App policies must be set via UI - see" \
-      "       https://github.com/organizations/${org}/settings/installations" \
-      "       https://github.com/organizations/${org}/settings/oauth_application_policy"
+   printf '%s\n' "\
+skip: $org: GitHub App / OAuth App policies must be set via UI - see
+       https://github.com/organizations/${org}/settings/installations
+       https://github.com/organizations/${org}/settings/oauth_application_policy"
    record_skip
    ## Sample of what would be set if a stable REST surface existed:
    # body="$(jq -n '{
@@ -621,9 +629,11 @@ apply_org_policy() {
 ##   $1 = label, $2 = API path, $3 = jq filter (default '.').
 audit_get() {
    local label path jq_filter result status body extracted
+
    label="$1"
    path="$2"
    jq_filter="${3:-.}"
+
    result="$(ghorg_api GET "$path")" || {
       printf '%s\n' "  $label: <api error>"
       return 0
@@ -657,8 +667,11 @@ audit_org_state() {
    local pending approved installs install_line total no_secret
    local safe_pending safe_approved safe_total safe_no_secret safe_install_line
    local repos repo missing_count have_count missing_list
+
    org="$1"
-   printf '\n%s\n' "=== audit: $org ==="
+
+   printf '%s\n' ""
+   printf '%s\n' "=== audit: $org ==="
 
    audit_get 'fork-PR approval policy' \
       "/orgs/${org}/actions/permissions/fork-pr-contributor-approval" \
@@ -880,12 +893,15 @@ audit_org_state() {
 ## "apply to all repos" org endpoint).
 apply_repo_policy() {
    local owner repo patch
+
    owner="$1"
    repo="$2"
+
    ghorg_validate_name "$owner" user || return 1
    ghorg_validate_name "$repo"  repo || return 1
 
    patch="$(jq -n -- '{has_wiki: false, has_issues: true}')"
+
    api_call "${owner}/${repo}: wiki=off, issues=on" \
       PATCH "/repos/${owner}/${repo}" "$patch" || true
 }
@@ -916,7 +932,8 @@ main() {
    for org in "${ORGS[@]}"; do
       apply_org_policy "$org"
 
-      printf '\n%s\n' "=== repo policy: $org ==="
+      printf '%s\n' ""
+      printf '%s\n' "=== repo policy: $org ==="
       ## Public, non-archived, non-fork repos. The org-level enable_all
       ## endpoints already cover security products on every repo; this
       ## loop is just for has_wiki / has_issues which have no org-wide
@@ -950,13 +967,14 @@ main() {
    n_ok="${n_ok:-0}"; n_warn="${n_warn:-0}"
    n_dry="${n_dry:-0}"; n_skip="${n_skip:-0}"
 
-   printf '\n%s\n' '=== summary ==='
-   printf '%s\n' \
-      "  ok:      $n_ok" \
-      "  warn:    $n_warn" \
-      "  dry-run: $n_dry" \
-      "  skip:    $n_skip   (UI-only; see \"skip:\" lines above)"
-   printf '\n%s\n' 'done.'
+   printf '%s\n' ""
+   printf '%s\n' "=== summary ==="
+   printf '%s\n' "  ok:      $n_ok"
+   printf '%s\n' "  warn:    $n_warn"
+   printf '%s\n' "  dry-run: $n_dry"
+   printf '%s\n' "  skip:    $n_skip   (UI-only; see \"skip:\" lines above)"
+   printf '%s\n' ""
+   printf '%s\n' "done."
 
    ## Non-zero exit if anything went wrong, so callers (cron, CI) can
    ## react. dry-run + skip are not failures.

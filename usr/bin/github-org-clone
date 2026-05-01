@@ -102,7 +102,9 @@ ghorg_require_deps
 
 repo_url() {
   local repo
+
   repo="$1"
+
   case "$url_scheme" in
     ssh)   printf '%s' "git@github.com:${source_org}/${repo}.git" ;;
     https) printf '%s' "https://github.com/${source_org}/${repo}.git" ;;
@@ -118,8 +120,11 @@ clone_or_update_one() {
   local repo repo_dir url existing_url current_branch
   local safe_existing_url safe_branch
   local -a clone_args
+
   repo="$1"
+
   ghorg_validate_name "$repo" repo || return 0
+
   repo_dir="${dest_dir}/${repo}"
   url="$(repo_url "$repo")"
 
@@ -192,6 +197,7 @@ clone_or_update_one() {
 
 main() {
   local repos repo_count active repo
+
   mkdir -p -- "$dest_dir"
 
   repos="$(ghorg_list_repos "$source_org" \

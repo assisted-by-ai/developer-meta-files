@@ -28,9 +28,11 @@ source /usr/libexec/developer-meta-files/github-org-lib.bsh
 fail=0
 expect() {
   local desc want got want_q got_q
+
   desc="$1"
   want="$2"
   got="$3"
+
   if [ "$got" != "$want" ]; then
     want_q="$(printf '%q' "$want")"
     got_q="$(printf '%q' "$got")"

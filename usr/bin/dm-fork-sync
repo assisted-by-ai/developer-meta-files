@@ -73,6 +73,7 @@ if ! command -v github-org-fork >/dev/null 2>&1; then
 fi
 
 for src in "${SOURCE_ORGS[@]}"; do
-   printf '\n%s\n' "=== ${src} -> ${MIRROR} ==="
+   printf '%s\n' ""
+   printf '%s\n' "=== ${src} -> ${MIRROR} ==="
    github-org-fork "${POLICY_FLAGS[@]}" "$@" -- "$src" "$MIRROR"
 done

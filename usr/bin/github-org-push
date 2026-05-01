@@ -105,7 +105,9 @@ ghorg_require_deps
 
 remote_url() {
   local repo
+
   repo="$1"
+
   case "$url_scheme" in
     ssh)   printf '%s' "git@github.com:${target_owner}/${repo}.git" ;;
     https) printf '%s' "https://github.com/${target_owner}/${repo}.git" ;;
@@ -114,6 +116,7 @@ remote_url() {
 
 push_one() {
   local repo_dir repo url branch resolved_head safe_repo_dir
+
   repo_dir="$1"
   repo="$(basename -- "$repo_dir")"
 
@@ -214,6 +217,7 @@ push_one() {
 main() {
   local candidate_count active repo_dir base_name candidate_dir
   local -a candidate_dirs
+
   if [ ! -d "$source_dir" ]; then
     printf '%s\n' "error: source dir does not exist: $source_dir" >&2
     exit 1
