@@ -50,8 +50,6 @@ expect 'backoff[3]' '240'  "$(ghorg_compute_backoff_seconds 3)"
 ## Retry-After header takes precedence.
 hdr="$(mktemp)"
 
-## Trap target for the per-run header tempfile. Standalone function
-## (not an inline command string) so the trap is auditable.
 test_rate_limit_retry_cleanup_hdr() {
    # shellcheck disable=SC2317  ## invoked indirectly via trap
    safe-rm --force -- "${hdr}"

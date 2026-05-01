@@ -10,124 +10,56 @@
 ##   source /usr/libexec/developer-meta-files/github-org-lib.bsh
 
 ## THREAT MODEL
-## ============
-## Every script in this suite operates under the assumption that the
-## GitHub REST API is hostile: a compromised, impersonated, MITM'd, or
-## deliberately misbehaving endpoint may return arbitrary bytes in any
-## field, including ones GitHub documents as "alphanumeric" or
-## "integer". The scripts therefore treat every byte returned by the
-## API as untrusted until it has crossed one of two checkpoints:
-##
-##   1) Identifier sink (URL path, file path, git argument, command
-##      line): the value MUST first pass ghorg_validate_name (strict
-##      ASCII allowlist) or a numeric-only regex. No untrusted byte
-##      ever flows directly into a sink that interprets it.
-##
-##   2) Terminal display sink (printf to stdout/stderr): the value
-##      MUST first pass through sanitize-string (via ghorg_safe_print
-##      or piped sanitize-string). This strips ANSI escapes, control
-##      chars, HTML markup, and truncates oversized payloads, so a
-##      hostile API response cannot smuggle terminal escapes,
-##      bidi/RTL tricks, or runaway output onto the operator's
-##      screen.
-##
-## "Sanitize at receive" is NOT done because the body is JSON and
-## must be parsed by jq; sanitize-string would corrupt valid JSON.
-## The boundary is therefore "after extraction from JSON, before
-## first use" - either as an identifier (validate) or as display
-## text (sanitize).
-##
-## Bodies that are echoed verbatim for error reporting (HTTP 4xx/5xx
-## payloads) are always passed through ghorg_safe_print first; raw
-## body bytes never reach the terminal.
-##
-## Resource caps against a hostile or misbehaving server:
-##   - --max-filesize 10485760 (10 MB)  per response body
-##   - --connect-timeout 30, --max-time 120 (seconds)
-##   - --max-redirs GHORG_MAX_REDIRS (default 5) bounds redirect chain
-##     length; modern curl already strips Authorization on cross-host
-##     redirect, so the cap here is for request-URL exfil, not token
-##     leak.
-##   - GHORG_MAX_PAGES (default 100) caps pagination depth so a server
-##     returning 100 results forever cannot keep ghorg_list_repos
-##     looping until OOM.
-##   - GHORG_MAX_ID_LEN (20) caps the byte length of any numeric id
-##     extracted from a body before it is interpolated into a URL
-##     path - bounds a potential 10000-digit "numeric" payload that
-##     would still pass ^[0-9]+$.
-##   - GHORG_MAX_BACKOFF_SECONDS (3600) caps a single sleep computed
-##     from Retry-After / X-RateLimit-Reset.
-##
-## Clone-time hardening (github-org-clone):
-##   - GIT_LFS_SKIP_SMUDGE=1 prevents the LFS smudge filter from
-##     auto-fetching attacker-chosen objects on clone.
-##   - --config protocol.file.allow=never and protocol.ext.allow=never
-##     block the file:// and ext:: helper protocols, which have been
-##     used in past CVEs to read local files or run shell commands
-##     when a hostile upstream redirects a sub-fetch.
+## Every byte returned by the GitHub REST API is treated as untrusted.
+## Two boundaries enforce that:
+##   1) Identifier sinks (URL paths, file paths, git args): validate
+##      via ghorg_validate_name (strict ASCII allowlist) or a numeric
+##      regex with length cap. See GHORG_MAX_ID_LEN.
+##   2) Display sinks (terminal): sanitize via ghorg_safe_print
+##      (sanitize-string from helper-scripts: strips ANSI, control
+##      chars, HTML; truncates).
+## Resource caps below bound the local damage a hostile or misbehaving
+## server can cause through pagination, redirect chains, oversized
+## bodies, or oversized "numeric" ids.
+## Clone-time: github-org-clone sets GIT_LFS_SKIP_SMUDGE=1 and
+## protocol.file.allow=never / protocol.ext.allow=never on `git clone`
+## to block LFS smudge-fetch and the file:// / ext:: helper protocols.
 
-## ============================================================================
-## Globals
-## ============================================================================
-## All script-level globals are declared here so a reader can see at a glance
-## what state the lib carries. User-tunable knobs use ${VAR:-DEFAULT} so callers
-## can override via env; pure constants are bare assignments.
-
-## API base URL. Override for testing against a captured-replay server.
+## API base URL. Override to point at a captured-replay server.
 [[ -v GHORG_API ]] || GHORG_API='https://api.github.com'
 
-## Maximum length, in bytes, of a GitHub repo name as documented by
-## GitHub. Used both as rejection threshold (via ghorg_validate_name)
-## and as truncation cap for safe display via ghorg_safe_print.
+## Per documented GitHub limits.
 GHORG_MAX_REPO_NAME_LEN=100
-
-## Maximum length, in bytes, of a GitHub user login as documented by
-## GitHub.
 GHORG_MAX_USER_LOGIN_LEN=39
 
-## Maximum length, in bytes, of any other API-derived string before
-## sanitize-string truncates it for terminal display.
+## Truncation cap for any other API-derived string at display time.
 GHORG_MAX_DISPLAY_LEN=256
 
-## Number of automatic retries on transient failures (rate-limit, 5xx).
-## ghorg_compute_backoff_seconds doubles the wait per attempt:
-## 30s, 60s, 120s, 240s ... clamped at GHORG_MAX_BACKOFF_SECONDS.
+## Backoff doubles per attempt: 30s, 60s, 120s, 240s ... clamped at
+## GHORG_MAX_BACKOFF_SECONDS.
 [[ -v GHORG_MAX_RETRIES ]] || GHORG_MAX_RETRIES='3'
 
-## Hard cap on a single backoff sleep. If the API tells us to wait
-## longer than this (e.g. via X-RateLimit-Reset on a quiet hour
-## boundary), refuse to wait silently and let the caller decide.
+## Refuse a single sleep longer than this (Retry-After /
+## X-RateLimit-Reset on a quiet hour boundary can suggest hours).
 [[ -v GHORG_MAX_BACKOFF_SECONDS ]] || GHORG_MAX_BACKOFF_SECONDS='3600'
 
-## Pagination cap for ghorg_list_repos. A hostile or misbehaving API
-## could keep returning 100 results per page forever; without this cap
-## the pager loop would run until the local process ran out of memory.
-## 100 pages at 100 repos per page = 10,000 repos, well above any real
-## org's repo count.
+## Pagination cap. A server returning 100 results per page forever
+## would otherwise loop ghorg_list_repos until OOM.
 [[ -v GHORG_MAX_PAGES ]] || GHORG_MAX_PAGES='100'
 
-## Maximum permitted redirects on a single API call. The GitHub REST
-## API does not normally redirect within itself; bounding this guards
-## against a hostile / MITM'd response that injects a redirect chain
-## to leak request URLs to an attacker-controlled host. (Modern curl
-## already strips Authorization on cross-host redirect by default; this
-## cap is for the request URL itself, not the token.)
+## Redirect-chain cap. Curl already strips Authorization on cross-host
+## redirect; this caps request-URL exfil through a redirect chain.
 [[ -v GHORG_MAX_REDIRS ]] || GHORG_MAX_REDIRS='5'
 
-## Hard cap on the byte length of any numeric ID extracted from an API
-## response before that ID is interpolated into a URL path. The
-## ^[0-9]+$ regex check would otherwise accept a string of arbitrary
-## length, giving a hostile API a way to push a 10000-byte URL
-## fragment through.
+## Cap on the byte length of a numeric id extracted from a body before
+## interpolation into a URL path. ^[0-9]+$ alone would accept arbitrary
+## length.
 GHORG_MAX_ID_LEN=20
 
-## Cache of <owner> -> "User"|"Organization". Populated by
-## ghorg_account_type on first lookup; read by every code path that
-## branches on account type.
+## Cache <owner> -> "User"|"Organization".
 declare -g -A ghorg_account_type_cache=()
 
-## Cached login of the user whose token is in use. Populated by
-## ghorg_authenticated_user on first call. Empty until the first call.
+## Cached login of the token-owner.
 ghorg_authenticated_user_cached=''
 
 ## ============================================================================
@@ -174,8 +106,6 @@ ghorg_token() {
     printf '%s\n' "error: '${token_file}' is not readable" >&2
     return 1
   fi
-  ## Reject a world-readable / group-readable token file outright;
-  ## refusing it is safer than silently using a leaked secret.
   mode="$(stat -c '%a' -- "${token_file}" 2>/dev/null \
     || stat -f '%Lp' -- "${token_file}" 2>/dev/null \
     || printf '%s' '600')"
@@ -186,11 +116,9 @@ ghorg_token() {
   head --lines=1 -- "${token_file}" | tr -d '\r\n'
 }
 
-## Verifies curl, jq, and sanitize-string are present. The github-org-*
-## tools depend on all three; failing fast here keeps the per-tool
-## main paths uncluttered. sanitize-string is from helper-scripts and
-## is required to safely print API-derived strings without letting
-## terminal escapes, HTML, or oversized payloads through.
+## Verifies curl, jq, and sanitize-string are present. sanitize-string
+## comes from helper-scripts and is what makes the display-sink
+## boundary safe.
 ghorg_require_deps() {
   local cmd
 
@@ -202,17 +130,9 @@ ghorg_require_deps() {
   done
 }
 
-## Prints an untrusted byte sequence safely for terminal display via
-## sanitize-string from helper-scripts (which strips ANSI escapes,
-## control characters, and HTML markup, then truncates), so a hostile
-## API response cannot smuggle escape sequences, bidi/RTL tricks, or
-## oversized payloads onto the operator's screen.
-##
-## sanitize-string accepts the input as its second positional arg, so
-## a pipeline + printf is unnecessary - calling it directly with the
-## string positional is shorter and avoids a needless subshell.
-##
-## Args: $1 = max length (integer or "nolimit"), $2 = string
+## Display-sink helper: passes an untrusted string through
+## sanitize-string. Args: $1 = max length (integer or "nolimit"),
+## $2 = string.
 ghorg_safe_print() {
   local max s
 
@@ -223,27 +143,17 @@ ghorg_safe_print() {
 }
 
 ## Strict allowlist validation for any identifier supplied by the
-## GitHub API (repo name, user login, org login). Even though GitHub
-## documents these character rules, we re-enforce them locally because
-## a compromised, impersonated, or proxied API endpoint could otherwise
-## smuggle path-traversal, argument-injection, or terminal-escape
-## payloads through a "name" field.
-##
-## Rules (intersection of GitHub's documented rules and what is safe to
-## use as a path/URL/git-arg component):
+## GitHub API (repo name, user login, org login).
+## Rules:
 ##   - non-empty
 ##   - length within kind-specific cap
-##   - bytes match ^[A-Za-z0-9._-]+$ (ASCII allowlist; rejects unicode,
-##     control chars, NUL, whitespace, slash, backslash, shell metas)
-##   - does not start with `-` (arg injection)
-##   - does not contain embedded `..` (path traversal)
-##   - is not equal to `.`, `..`, or `.git` (path-traversal or
-##     git-internal collision)
+##   - bytes match ^[A-Za-z0-9._-]+$
+##   - does not start with `-`
+##   - does not contain embedded `..`
+##   - is not equal to `.`, `..`, or `.git`
 ##
-## Note: leading-dot names other than the three reserved ones above
-## are accepted. This lets us list/clone/fork legitimate repo names
-## like `.github` (the org-profile-and-defaults repo) and `.gitignore`
-## (a known meta repo), which the GitHub web UI surfaces normally.
+## Leading-dot names other than the three reserved ones are accepted -
+## .github and .gitignore are legitimate repos.
 ##
 ## Args: $1 = name, $2 = kind ("repo" or "user")
 ## Return: 0 = valid, non-zero = invalid (error logged)
@@ -420,13 +330,7 @@ ghorg_mock_dispatch() {
 ## Auth: token from env or token file. Without a token, the request
 ## goes anonymously (works for public reads at GitHub's 60/hr rate
 ## limit per IP).
-## Trap target for ghorg_api's per-call header tempfile. Reads the
-## hdr_file local from the calling function via bash dynamic scoping
-## (RETURN trap runs while the caller's scope is still alive). The
-## trap is registered AFTER hdr_file is assigned by mktemp, so it is
-## already set under `set -o nounset` by the time the trap can fire;
-## no `${hdr_file:-}` default is needed (and using one would mask a
-## real init-order bug if the trap registration ever moved earlier).
+
 ghorg_api_cleanup_hdr_file() {
   safe-rm --force -- "${hdr_file}"
 }
@@ -454,8 +358,6 @@ ghorg_api() {
 
   token="$(ghorg_token 2>/dev/null)" || token=''
   hdr_file="$(mktemp)"
-
-  ## Best-effort cleanup; will fire on every return path under errexit.
   trap ghorg_api_cleanup_hdr_file RETURN
 
   args=(
@@ -672,17 +574,11 @@ ghorg_list_repos() {
     count="$(printf '%s' "${body}" | jq -- 'length')"
     [ "${count}" = '0' ] && break
 
-    ## Capture jq output into a string first, then iterate. Avoids
-    ## "while ... < <(printf | jq)" where the subshell's exit is
-    ## invisible to errexit + pipefail; if jq failed mid-pipeline
-    ## the loop would silently see no input and we would think the
-    ## page was empty.
+    ## Capture into a string then iterate; "while ... < <(jq)" would
+    ## hide a jq failure from errexit + pipefail and silently treat
+    ## the page as empty.
     names_text="$(printf '%s' "${body}" | jq -r -- "${jq_filter}")"
 
-    ## Validate every name returned by the API before passing it on.
-    ## A hostile or impersonated API endpoint could otherwise smuggle
-    ## path-traversal, argument-injection, or unicode-escape payloads
-    ## here. Invalid names are dropped with a logged rejection.
     while IFS= read -r name; do
       [ -z "${name}" ] && continue
       if ghorg_validate_name "${name}" repo; then
@@ -696,14 +592,8 @@ ghorg_list_repos() {
 }
 
 ## Applies an include/exclude regex pair to a stream of repo names on
-## stdin. Order: include first (drop non-matching), then exclude (drop
-## matching).
-##
-## Empty pattern = "no filter on this side". This is intentional and
-## limited to repo-name filtering (the only caller) where include='' /
-## exclude='' is the natural default for "no filter passed on the CLI".
-## It is NOT a generic security filter - never wire untrusted input
-## through here as if it were one.
+## stdin. Order: include first, then exclude. Empty pattern = no
+## filter on that side.
 ##
 ## Args: $1 = include regex (POSIX ERE) or '', $2 = exclude regex or ''
 ghorg_filter_names() {

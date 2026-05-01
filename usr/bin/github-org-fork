@@ -297,11 +297,8 @@ configure_one() {
   fi
 }
 
-## Builds an associative array (passed by name in $1) from a newline-
-## separated list of repo names on $2. Empty lines are skipped. Used by
-## main() to build a presence set for set-difference and set-
-## intersection without an external `comm` + process-substitution
-## round-trip; pure bash keeps every step subject to errexit.
+## Populates the associative array named in $1 with one key per
+## newline-separated repo name in $2. Empty lines skipped.
 fork_main_build_repo_set() {
   local set_name list_text repo_name
 
@@ -347,17 +344,12 @@ main() {
     return 0
   fi
 
-  ## Compute set difference (source minus target) in pure bash. Avoids
-  ## the previous "comm -23 <(printf ...) <(printf ...)" form, which
-  ## ran printf in two process substitutions whose exit codes errexit
-  ## could not see; a printf failure inside the sub-process would
-  ## silently feed comm an empty stream.
+  ## Set difference: source repos absent from target.
+  ## ${target_set[$key]:-} is required because nounset triggers on an
+  ## associative-array subscript with an unset key.
   fork_main_build_repo_set target_set "${target_repos}"
   while IFS= read -r repo_name; do
     [ -z "${repo_name}" ] && continue
-    ## ${target_set[$key]:-} is required here: associative-array
-    ## subscript on an unset key triggers nounset. Not a "default
-    ## hides a bug" case - the absence IS the signal.
     [ -z "${target_set[${repo_name}]:-}" ] && missing+=( "${repo_name}" )
   done <<< "${source_repos}"
 
@@ -375,9 +367,8 @@ main() {
   target_repos="$(ghorg_list_repos "${target_owner}" 1 1 1 \
     | sort --unique)"
 
-  ## Configure only those target repos that exist for a same-named
-  ## source repo - leaves unrelated target-side repos alone. Same
-  ## set-intersection idea, in pure bash.
+  ## Set intersection: source repos that exist on target. Configures
+  ## only matching repos; leaves unrelated target-side repos alone.
   target_set=()
   fork_main_build_repo_set target_set "${target_repos}"
   while IFS= read -r repo_name; do

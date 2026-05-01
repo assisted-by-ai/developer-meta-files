@@ -180,14 +180,11 @@ done
 
 ghorg_require_deps
 
-## Per-run counter accumulator. main() creates a tempfile and exports
-## its path; api_call and record_skip append a one-word status (ok |
-## warn | dry | skip) per event. main() then sums by `wc -l` at the
-## end. A tempfile (not in-memory variables) is required because the
-## per-repo apply loop backgrounds children with `&`; bash variable
-## updates in those subshells would be lost on join. Short appends
-## from concurrent processes are atomic up to PIPE_BUF (4096 bytes on
-## Linux) - our writes are 4-5 bytes.
+## Per-run event counter. main() creates a tempfile; api_record
+## appends one word per event (ok | warn | dry | skip) and main()
+## sums them at the end. Tempfile rather than a bash variable because
+## the per-repo loop backgrounds children with `&`; PIPE_BUF (4096B on
+## Linux) makes our 4-5 byte appends atomic across concurrent writers.
 api_counter_file=''
 
 api_record() {
@@ -195,20 +192,10 @@ api_record() {
    printf '%s\n' "$1" >> "${api_counter_file}"
 }
 
-## Records a SKIP event. Used by apply_org_policy for settings that
-## have no REST API (PAT, App, OAuth policies) and must be flipped in
-## the UI.
 record_skip() {
    api_record skip
 }
 
-## Wrapper that prints a one-line summary per HTTP call. On non-2xx
-## the body is logged via sanitize-string and the call returns
-## non-zero, but the caller decides whether to abort or continue.
-##
-## Success lines are printed unconditionally (not gated on -v) so the
-## operator sees positive evidence that each setting was applied; the
-## end-of-run summary then shows the totals.
 api_call() {
    local label method path body result status response_body safe_body
 
@@ -423,9 +410,7 @@ apply_org_policy() {
       || true
 
    ## 2. Default workflow GITHUB_TOKEN permissions = read; cannot
-   ##    approve PRs. Covers the "default workflow permissions" and
-   ##    "Allow Actions to create and approve pull requests" toggles
-   ##    in the org Actions settings UI.
+   ##    approve PRs.
    body="$(jq -n -- '{
       default_workflow_permissions: "read",
       can_approve_pull_request_reviews: false
@@ -435,12 +420,9 @@ apply_org_policy() {
       || true
 
    ## 3. Allowed Actions = selected (github-owned + verified creators).
-   ##    Two-step: first turn the org-level Actions permission to
-   ##    "selected" (gating which actions can be invoked), then set the
-   ##    selected-actions list to allow github-owned and verified.
-   ##    CAUTION: a workflow that pins to an unverified third-party
-   ##    action will start failing after this. Audit before applying
-   ##    if you have not already; --dry-run shows what would change.
+   ##    Two calls: switch allowed_actions to "selected", then set the
+   ##    list. CAUTION: workflows pinned to unverified third-party
+   ##    actions will start failing after this; audit first.
    body="$(jq -n -- '{
       enabled_repositories: "all",
       allowed_actions: "selected"
@@ -457,27 +439,12 @@ apply_org_policy() {
       PUT "/orgs/${org}/actions/permissions/selected-actions" "${body}" \
       || true
 
-   ## 4. Member-side org policy: default repo permission pinned to
-   ##    "read", repository creation restricted to admins. Bundled
-   ##    into one PATCH /orgs/{org} body.
-   ##
-   ##    Verified against the OpenAPI spec
-   ##    (github/rest-api-description) at edit time:
-   ##      - default_repository_permission: present
-   ##      - members_can_create_repositories: present
-   ##      - members_can_create_public_repositories: present
-   ##      - members_can_create_private_repositories: present
-   ##      - members_can_create_internal_repositories: present
-   ##    Removed (not in spec or deprecated):
-   ##      - members_allowed_repository_creation_type (DEPRECATED;
-   ##        replaced by the granular members_can_create_*_repositories
-   ##        booleans).
-   ##      - members_can_delete_repositories (NOT in PATCH /orgs/{org}
-   ##        schema; would be silently ignored. Restricting repo
-   ##        deletion is UI-only as of verification).
-   ##      - two_factor_requirement_enabled (READ-only field on the
-   ##        GET /orgs/{org} response; not settable via PATCH. 2FA
-   ##        enforcement is UI-only - see step 4b below).
+   ## 4. Member-side org policy: default repo permission = read,
+   ##    repository creation restricted to admins.
+   ##    members_allowed_repository_creation_type (deprecated),
+   ##    members_can_delete_repositories (UI-only), and
+   ##    two_factor_requirement_enabled (read-only on PATCH; see step
+   ##    4b) are deliberately NOT in the body.
    body="$(jq -n -- '{
       default_repository_permission: "read",
       members_can_create_repositories: false,
@@ -489,62 +456,28 @@ apply_org_policy() {
       PATCH "/orgs/${org}" "${body}" \
       || true
 
-   ## 4b. 2FA enforcement (UI-only).
-   ##     two_factor_requirement_enabled is a READ-only field on GET
-   ##     /orgs/{org}; the OpenAPI spec exposes no PATCH/PUT setter
-   ##     for it. Print a SKIP with the UI URL so the operator knows
-   ##     to flip it manually.
-   ##     CAUTION: enabling 2FA in the UI on an org with members who
-   ##     do not have 2FA turned on will REMOVE those members. The
-   ##     --audit mode lists members lacking 2FA so the operator can
-   ##     confirm membership state before flipping the switch.
+   ## 4b. 2FA enforcement is UI-only; print a skip with the UI URL.
+   ##     CAUTION: enabling 2FA on an org with members who don't have
+   ##     2FA turned on will REMOVE those members. --audit lists them
+   ##     so the operator can verify before flipping the switch.
    printf '%s\n' "\
 skip: ${org}: 2FA enforcement must be set via UI - see
        https://github.com/organizations/${org}/settings/security"
    record_skip
 
-   ## 5+6. Code security via the modern Code Security Configurations
-   ##      API (replaces the now-deprecated PATCH /orgs/{org} security
-   ##      defaults fields and the /orgs/{org}/{product}/enable_all
-   ##      family). Three calls per org:
-   ##        a) upsert a configuration named CODE_SEC_CONFIG_NAME with
-   ##           the desired feature toggles (idempotent: if a same-name
-   ##           config exists, PATCH it; else POST).
-   ##        b) attach the configuration to ALL existing repos
-   ##           (scope=all). One call regardless of repo count.
-   ##        c) set the configuration as the default for newly created
-   ##           repos (default_for_new_repos=all).
-   ##
-   ##      Deliberately disabled in the configuration: code_scanning_default_setup
-   ##      (CodeQL default setup is brittle - see header) and
-   ##      private_vulnerability_reporting (project channel is OpenPGP
-   ##      email - see header).
+   ## 5+6. Code security via the Code Security Configurations API
+   ##      (replaces deprecated PATCH /orgs/{org} security-defaults
+   ##      fields and /orgs/{org}/{product}/enable_all). See header
+   ##      for which features are toggled and which are deliberately
+   ##      disabled.
    apply_code_security_config "${org}" || true
 
-   ## 7. Org ruleset on the default branch of every repo: block force
-   ##    pushes (non_fast_forward), block deletion, require signed
-   ##    commits. ~DEFAULT_BRANCH applies to whichever branch each repo
-   ##    has set as default; ~ALL covers every repo in the org.
-   ##
-   ##    bypass_actors is set to the empty list explicitly. Without an
-   ##    actor in this list NO ONE - including org owners and repo
-   ##    admins - can override the rules. This is stricter than the
-   ##    legacy per-repo branch protection, where enforce_admins=false
-   ##    would let admins force-push past the rule. Rulesets and
-   ##    legacy branch protections layer additively (most restrictive
-   ##    wins), so this also closes the bypass on any leftover legacy
-   ##    branch protection rules from earlier runs.
-   ##
-   ##    DELIBERATELY OMITTED rule types:
-   ##      - pull_request (would require all merges into the default
-   ##        branch to go through a PR). Maintainers push directly to
-   ##        master from the terminal; enabling this would cause the
-   ##        "Bypassed rule violations: Changes must be made through a
-   ##        pull request" warning on every legitimate push.
-   ##      - required_status_checks (each repo would need a CI defined
-   ##        and named here; not feasible to apply uniformly).
-   ##      - required_linear_history (opinionated; can break some
-   ##        merge workflows).
+   ## 7. Org ruleset on every repo's default branch: block force-push,
+   ##    block deletion, require signed commits. bypass_actors=[] -
+   ##    no one, including org owners, can override.
+   ##    Omitted: pull_request (we push directly to master),
+   ##    required_status_checks (per-repo CI coupling),
+   ##    required_linear_history (breaks some merge workflows).
    branch_ruleset="$(jq -n --arg name "${RULESET_NAME_BRANCH}" -- '{
       name: $name,
       target: "branch",
@@ -562,12 +495,10 @@ skip: ${org}: 2FA enforcement must be set via UI - see
    }')"
    upsert_org_ruleset "${org}" "${RULESET_NAME_BRANCH}" "${branch_ruleset}" || true
 
-   ## 8. Org ruleset for tags: block tag deletion, block tag
-   ##    re-pointing (non_fast_forward), require signed tags. Critical
-   ##    for release integrity - without this, anyone with push rights
-   ##    could move a release tag like v1.0 to point at a different
-   ##    commit. Same bypass_actors=[] enforcement: nobody, including
-   ##    owners, can override.
+   ## 8. Org ruleset for tags: block deletion, block re-pointing,
+   ##    require signed tags. bypass_actors=[]. Without this, push
+   ##    rights would let anyone move a release tag like v1.0 to a
+   ##    different commit.
    tag_ruleset="$(jq -n --arg name "${RULESET_NAME_TAG}" -- '{
       name: $name,
       target: "tag",
@@ -585,56 +516,21 @@ skip: ${org}: 2FA enforcement must be set via UI - see
    }')"
    upsert_org_ruleset "${org}" "${RULESET_NAME_TAG}" "${tag_ruleset}" || true
 
-   ## 9. Personal access token policies (audit-only path).
-   ##    The org-level toggles "Allow access via fine-grained PATs",
-   ##    "Require approval for fine-grained PATs", "Allow classic PATs",
-   ##    "Restrict access by classic PATs" are configurable in the org
-   ##    Settings UI under Personal access tokens. As of research, the
-   ##    public REST API exposes GETs for pending requests and approved
-   ##    PATs but does NOT expose stable setters for the policy
-   ##    toggles. The apply path is therefore commented out below; the
-   ##    audit path (--audit) lists pending requests and approved PATs
-   ##    so the operator can see what is in flight before flipping the
-   ##    toggles in the UI.
-   ##
-   ## TODO: replace with real API calls when GitHub publishes stable
-   ## REST endpoints for the PAT policy toggles. Reference:
-   ## https://github.com/orgs/${org}/settings/personal-access-tokens
+   ## 9. PAT policy toggles (UI-only). REST exposes GETs for pending
+   ##    requests and approved PATs but no stable setters; --audit
+   ##    lists what's in flight, --apply prints a skip + UI URL.
    printf '%s\n' "\
 skip: ${org}: PAT policy toggles must be set via UI - see
        https://github.com/organizations/${org}/settings/personal-access-tokens"
    record_skip
-   ## Sample of what would be set if a stable REST surface existed:
-   # body="$(jq -n '{
-   #    personal_access_token_classic_allowed: false,
-   #    personal_access_token_fine_grained_approval_required: true
-   # }')"
-   # api_call "${org}: PAT policy (block classic, require approval)" \
-   #    PATCH "/orgs/${org}" "${body}" || true
 
-   ## 10. GitHub App / OAuth App installation policies (audit-only).
-   ##    "Restrict App installation to org owners", "Restrict OAuth
-   ##    third-party access", "Require approval for new App installs"
-   ##    are UI-only. REST exposes GETs for installed Apps but no
-   ##    setters. The audit path lists installed Apps; the apply path
-   ##    skips with a UI pointer.
-   ##
-   ## TODO: replace with real API calls when GitHub publishes stable
-   ## REST endpoints. Reference:
-   ## https://github.com/organizations/${org}/settings/oauth_application_policy
-   ## https://github.com/organizations/${org}/settings/installations
+   ## 10. GitHub App / OAuth App install policies (UI-only). Same
+   ##     pattern as step 9.
    printf '%s\n' "\
 skip: ${org}: GitHub App / OAuth App policies must be set via UI - see
        https://github.com/organizations/${org}/settings/installations
        https://github.com/organizations/${org}/settings/oauth_application_policy"
    record_skip
-   ## Sample of what would be set if a stable REST surface existed:
-   # body="$(jq -n '{
-   #    members_can_install_github_apps: false,
-   #    oauth_app_access_restrictions_enabled: true
-   # }')"
-   # api_call "${org}: App install/OAuth restrictions" \
-   #    PATCH "/orgs/${org}" "${body}" || true
 }
 
 ## One-line GET-and-print helper for audit_org_state. Args:
@@ -656,8 +552,6 @@ audit_get() {
       return 0
    fi
    body="$(ghorg_body_of "${result}")"
-   ## sanitize-string reads stdin natively, so the pipe is the
-   ## sanitization step; ghorg_safe_print is for arg-form callers.
    extracted="$(printf '%s' "${body}" \
       | jq -r -- "${jq_filter}" 2>/dev/null \
       | tr -- '\n' ' ' \
@@ -693,11 +587,9 @@ audit_org_state() {
       "/orgs/${org}/actions/permissions/workflow" \
       '"default=" + (.default_workflow_permissions // "?") + ", can_approve_PRs=" + ((.can_approve_pull_request_reviews // false) | tostring)'
 
-   ## Capture allowed_actions inline so we can decide whether the
-   ## selected-actions endpoint is meaningful. GitHub returns 409 on
-   ## /actions/permissions/selected-actions when allowed_actions is
-   ## not "selected" - audit shouldn't print a noisy HTTP 409 for
-   ## that expected case; it should print "(N/A)" with the reason.
+   ## /actions/permissions/selected-actions returns 409 when
+   ## allowed_actions != "selected"; suppress the call in that case
+   ## and print "(N/A)" instead of a noisy 409.
    allowed_actions=''
    actions_result="$(ghorg_api GET "/orgs/${org}/actions/permissions")" || true
    actions_status="$(ghorg_status_of "${actions_result}")"
@@ -832,8 +724,6 @@ audit_org_state() {
       else
          while IFS= read -r install_line; do
             [ -z "${install_line}" ] && continue
-            ## install_line is jq-extracted from an untrusted body
-            ## (.app_slug + .id concatenated). Sanitize before display.
             safe_install_line="$(ghorg_safe_print 200 "${install_line}")"
             printf '%s\n' "${safe_install_line}"
          done <<< "${installs}"
@@ -918,9 +808,6 @@ apply_repo_policy() {
       PATCH "/repos/${owner}/${repo}" "${patch}" || true
 }
 
-## Trap target for main()'s tally tempfile. Uses api_counter_file
-## from the script-global scope so the trap signature is a bare
-## function name rather than an inline command string.
 dm_github_policy_cleanup_counter_file() {
    safe-rm --force -- "${api_counter_file}"
 }

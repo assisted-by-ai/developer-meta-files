@@ -71,9 +71,6 @@ done
 unset GITHUB_TOKEN
 out_dir="$(mktemp --directory)"
 
-## Trap target for the per-run scratch dir. Standalone function
-## (not an inline command string) so the trap is auditable as a
-## named callable rather than a quoted snippet.
 probe_live_unauth_cleanup_out_dir() {
    safe-rm --recursive --force -- "${out_dir}"
 }
