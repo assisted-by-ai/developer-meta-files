@@ -1,3 +1,52 @@
+commit de964e753734b96178cbe4e28f204a830548e2ae
+Merge: f405bad c7572a9
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Fri May 1 06:43:38 2026 -0400
+
+    Merge remote-tracking branch 'assisted-by-ai/claude/style-and-org-vars-X9b1n'
+
+commit c7572a931e50e754195056b051c24694b5630edf
+Author: Claude <noreply@anthropic.com>
+Date:   Fri May 1 10:42:17 2026 +0000
+
+    audit: 403 phrasing parity; drop redundant github-org-set-fork-approval
+
+    Two related cleanups.
+
+      * dm-github-policy --audit: the rulesets-list and approved-tokens
+        branches printed bare "HTTP 403"; the PAT-requests branch
+        already had "(approval flow may be off / token lacks scope)".
+        Both bare lines now read "HTTP 403 (token may lack admin:org)"
+        so an operator running the live audit with a read-only PAT
+        sees a consistent reason rather than guessing whether 403 is a
+        real failure or expected for the token in use.
+
+      * github-org-set-fork-approval: deleted. dm-github-policy already
+        covers every use:
+          --get   -> dm-github-policy --audit (reports approval policy
+                     in the per-org block)
+          --set   -> dm-github-policy --apply (sets the project-fixed
+                     value all_external_contributors as step 1 of
+                     apply_org_policy)
+          --dry-run -> dm-github-policy --dry-run (same DRY-RUN: prefix
+                     idiom, same skip)
+        The standalone tool's only extra surface was setting a
+        non-default policy value, which dm-github-policy is opinionated
+        against by design. Tests test_set_fork_approval_get.sh and
+        test_set_fork_approval_user_refused.sh removed alongside the
+        binary; the shellcheck-clean file list dropped the entry. The
+        User-account refusal path the latter test exercised is still
+        covered indirectly via ghorg_account_type's exposure through
+        ghorg_list_repos / github-org-fork / github-org-clone.
+
+    AI-Assisted
+
+commit f405bad36dfda37e870ffd8bbb219c8dd0a076aa
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Fri May 1 10:29:50 2026 +0000
+
+    bumped changelog version
+
 commit 2aac444914694c9bd559ac3905a2311c3d2ce1ae
 Merge: ddaed18 29cdc3b
 Author: Patrick Schleizer <adrelanos@whonix.org>
