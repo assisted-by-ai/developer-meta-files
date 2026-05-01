@@ -52,12 +52,13 @@ if [ ! -r /usr/libexec/developer-meta-files/github-org-lib.bsh ]; then
   exit 1
 fi
 
+# shellcheck source=/usr/libexec/helper-scripts/has.sh
+source /usr/libexec/helper-scripts/has.sh
+
 ## sanitize-string is a runtime dep of github-org-lib for safe
 ## display. The tests use the lib's audit/error paths which call it.
-if ! command -v sanitize-string >/dev/null 2>&1; then
-  printf '%s\n' 'error: sanitize-string not on PATH (helper-scripts).' >&2
-  exit 1
-fi
+has sanitize-string \
+  || { printf '%s\n' 'error: sanitize-string not on PATH (helper-scripts).' >&2; exit 1; }
 
 pass=0
 fail=0

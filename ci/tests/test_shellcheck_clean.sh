@@ -24,10 +24,11 @@ if [ "${CI:-}" != "true" ]; then
    exit 1
 fi
 
-if ! command -v shellcheck >/dev/null 2>&1; then
-   printf '%s\n' 'error: shellcheck not found on PATH; install via apt.' >&2
-   exit 1
-fi
+# shellcheck source=/usr/libexec/helper-scripts/has.sh
+source /usr/libexec/helper-scripts/has.sh
+
+has shellcheck \
+   || { printf '%s\n' 'error: shellcheck not found on PATH; install via apt.' >&2; exit 1; }
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
@@ -46,7 +47,7 @@ files=(
    "${REPO_ROOT}/ci/test-github-org-tools.sh"
    "${REPO_ROOT}/ci/install-genmkfile.sh"
    "${REPO_ROOT}/ci/install-helper-scripts.sh"
-   "${REPO_ROOT}/ci/probe-live-unauth.sh"
+   "${REPO_ROOT}/ci/live-probe-unauth.sh"
 )
 ## Append every test_*.sh under ci/tests so adding a new test
 ## automatically subjects it to the same check.

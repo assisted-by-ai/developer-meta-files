@@ -27,9 +27,10 @@ if [ "${CI:-}" != "true" ]; then
 fi
 
 readonly clone_dir='/tmp/genmkfile-install'
-readonly upstream_url='https://github.com/Kicksecure/genmkfile.git'
+readonly UPSTREAM_OWNER='Kicksecure'
+readonly upstream_url="https://github.com/${UPSTREAM_OWNER}/genmkfile.git"
 
-git clone --depth=1 --branch=master -- "${upstream_url}" "${clone_dir}"
+git clone --depth=1 --no-tags --branch=master -- "${upstream_url}" "${clone_dir}"
 cd -- "${clone_dir}"
 GENMKFILE_DEBUG=1 ./usr/bin/genmkfile deb-all-dep
 GENMKFILE_DEBUG=1 ./usr/bin/genmkfile install
