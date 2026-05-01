@@ -27,8 +27,9 @@ shopt -s nullglob
 ## and might accidentally install symlinks into /usr/. CI=true is set
 ## by GitHub Actions and by the workflow at .github/workflows/.
 if [ "${CI:-}" != "true" ]; then
-   printf 'error: this script must run with CI=true (GitHub Actions or equivalent).\n' >&2
-   printf '       Set CI=true to acknowledge before invoking.\n' >&2
+   printf '%s\n' \
+      'error: this script must run with CI=true (GitHub Actions or equivalent).' \
+      '       Set CI=true to acknowledge before invoking.' >&2
    exit 1
 fi
 
@@ -37,7 +38,7 @@ TESTS_DIR="$SCRIPT_DIR/tests"
 FIXTURE_DIR="$SCRIPT_DIR/fixtures"
 
 if [ ! -d "$TESTS_DIR" ]; then
-  printf 'error: tests directory missing: %s\n' "$TESTS_DIR" >&2
+  printf '%s\n' "error: tests directory missing: $TESTS_DIR" >&2
   exit 1
 fi
 
@@ -45,15 +46,16 @@ fi
 ## package must be installed or the script tree present at the
 ## expected location).
 if [ ! -r /usr/libexec/developer-meta-files/github-org-lib.bsh ]; then
-  printf 'error: /usr/libexec/developer-meta-files/github-org-lib.bsh not found.\n' >&2
-  printf '       Install developer-meta-files or symlink the source-tree files.\n' >&2
+  printf '%s\n' \
+    'error: /usr/libexec/developer-meta-files/github-org-lib.bsh not found.' \
+    '       Install developer-meta-files or symlink the source-tree files.' >&2
   exit 1
 fi
 
 ## sanitize-string is a runtime dep of github-org-lib for safe
 ## display. The tests use the lib's audit/error paths which call it.
 if ! command -v sanitize-string >/dev/null 2>&1; then
-  printf 'error: sanitize-string not on PATH (helper-scripts).\n' >&2
+  printf '%s\n' 'error: sanitize-string not on PATH (helper-scripts).' >&2
   exit 1
 fi
 
@@ -63,23 +65,25 @@ fail_names=()
 
 for test_path in "$TESTS_DIR"/test_*.sh; do
   test_name="$(basename -- "$test_path")"
-  printf '== %s ==\n' "$test_name"
+  printf '%s\n' "== $test_name =="
   log_file="$(mktemp)"
   if GHORG_MOCK_DIR="$FIXTURE_DIR" bash -- "$test_path" > "$log_file" 2>&1; then
-    printf '  PASS\n'
+    printf '%s\n' '  PASS'
     pass=$(( pass + 1 ))
   else
-    printf '  FAIL\n'
-    sed 's/^/    | /' -- "$log_file"
+    printf '%s\n' '  FAIL'
+    sed -- 's/^/    | /' "$log_file"
     fail=$(( fail + 1 ))
     fail_names+=( "$test_name" )
   fi
-  rm -f -- "$log_file"
+  safe-rm --force -- "$log_file"
 done
 
-printf '\n=== summary: %s passed, %s failed ===\n' "$pass" "$fail"
+printf '\n%s\n' "=== summary: $pass passed, $fail failed ==="
 if [ "$fail" -gt 0 ]; then
-  printf 'failures:\n'
-  printf '  - %s\n' "${fail_names[@]}"
+  printf '%s\n' 'failures:'
+  for fname in "${fail_names[@]}"; do
+    printf '%s\n' "  - $fname"
+  done
   exit 1
 fi

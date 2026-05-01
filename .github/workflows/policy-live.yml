@@ -4,11 +4,18 @@
 
 ## AI-Assisted
 
-## Manual-trigger live-API audit. Runs `dm-github-policy --audit`
-## against the real GitHub REST API using the GHORG_AUDIT_TOKEN repo
-## secret (a fine-grained PAT scoped read-only to org-ai-assisted).
-## No writes; no fork CI; only fires when an authorized user clicks
-## "Run workflow" from the Actions tab.
+## Manual-trigger live-API policy check. Runs `dm-github-policy
+## --audit` followed by `dm-github-policy --dry-run` against the real
+## GitHub REST API using the GHORG_AUDIT_TOKEN repo secret (a
+## fine-grained PAT scoped read-only to org-ai-assisted). No writes;
+## no fork CI; only fires when an authorized user clicks "Run
+## workflow" from the Actions tab.
+##
+## --audit prints the current org state. --dry-run prints the
+## PATCH/PUT/POST calls it WOULD make (prefixed "DRY-RUN:") but
+## never actually mutates anything; both are GET-only on the live
+## API and are safe with a read-only PAT. If --audit fails, --dry-run
+## does not run (default GitHub Actions step ordering).
 ##
 ## To enable:
 ##   1. Mint a fine-grained PAT under the user that owns
@@ -17,25 +24,25 @@
 ##      Administration/Members/Webhooks).
 ##   2. Settings -> Secrets and variables -> Actions -> New repository
 ##      secret named GHORG_AUDIT_TOKEN.
-##   3. Actions tab -> "github-org tools (live audit)" workflow ->
-##      Run workflow.
+##   3. Actions tab -> "github-org tools (live policy check)"
+##      workflow -> Run workflow.
 ##
 ## To revoke: delete the secret in the same UI, or revoke the PAT in
 ## the user's Developer settings.
 
-name: github-org tools (live audit)
+name: github-org tools (live policy check)
 
 on:
   workflow_dispatch:
 
-## Read-only on the checked-out source. The audit does not touch the
-## repository content; it only calls the GitHub REST API.
+## Read-only on the checked-out source. Neither --audit nor --dry-run
+## touches the repository content; both only call the GitHub REST API.
 permissions:
   contents: read
 
 jobs:
-  live-audit:
-    name: dm-github-policy --audit (live)
+  live-policy-check:
+    name: dm-github-policy --audit + --dry-run (live)
     runs-on: ubuntu-latest
     container:
       image: debian:trixie
@@ -55,7 +62,7 @@ jobs:
           apt-get update
           apt-get install --yes --no-install-recommends -- \
             ca-certificates curl jq git sudo build-essential dctrl-tools \
-            python3
+            python3 safe-rm
 
       - name: Checkout developer-meta-files
         uses: actions/checkout@v6
@@ -91,3 +98,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GHORG_AUDIT_TOKEN }}
         run: dm-github-policy --audit
+
+      - name: Run dm-github-policy --dry-run (live)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GHORG_AUDIT_TOKEN }}
+        run: dm-github-policy --dry-run

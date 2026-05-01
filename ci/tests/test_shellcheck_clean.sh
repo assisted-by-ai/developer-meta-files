@@ -19,12 +19,13 @@ shopt -s inherit_errexit
 shopt -s shift_verbose
 
 if [ "${CI:-}" != "true" ]; then
-   printf 'error: this script must run with CI=true (GitHub Actions or equivalent).\n' >&2
+   printf '%s\n' \
+      'error: this script must run with CI=true (GitHub Actions or equivalent).' >&2
    exit 1
 fi
 
 if ! command -v shellcheck >/dev/null 2>&1; then
-   printf 'error: shellcheck not found on PATH; install via apt.\n' >&2
+   printf '%s\n' 'error: shellcheck not found on PATH; install via apt.' >&2
    exit 1
 fi
 
@@ -58,7 +59,7 @@ done < <(find -- "$REPO_ROOT/ci/tests" -mindepth 1 -maxdepth 1 \
 fail=0
 for script_path in "${files[@]}"; do
    if [ ! -r "$script_path" ]; then
-      printf 'FAIL: not readable: %s\n' "$script_path" >&2
+      printf '%s\n' "FAIL: not readable: $script_path" >&2
       fail=1
       continue
    fi

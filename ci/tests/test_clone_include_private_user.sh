@@ -18,7 +18,8 @@ shopt -s inherit_errexit
 shopt -s shift_verbose
 
 if [ "${CI:-}" != "true" ]; then
-   printf 'error: this script must run with CI=true (GitHub Actions or equivalent).\n' >&2
+   printf '%s\n' \
+      'error: this script must run with CI=true (GitHub Actions or equivalent).' >&2
    exit 1
 fi
 
@@ -43,8 +44,9 @@ out="$(github-org-clone --include-private --dry-run assisted-by-ai \
   /tmp/clone-private-user-out 2>&1 || true)"
 
 if grep --quiet -- 'cannot list private repos' <<< "$out"; then
-  printf 'FAIL: did not expect a refusal for the auth user listing their own privates\n' >&2
-  printf '%s\n' "$out" >&2
+  printf '%s\n' \
+    'FAIL: did not expect a refusal for the auth user listing their own privates' \
+    "$out" >&2
   exit 1
 fi
 

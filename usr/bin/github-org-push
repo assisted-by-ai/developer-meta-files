@@ -87,7 +87,7 @@ while [ "$#" -gt 0 ]; do
     -v|--verbose) verbose=1; shift ;;
     -h|--help) show_help; exit 0 ;;
     --) shift; break ;;
-    -*) printf 'unknown option: %s\n' "$1" >&2; exit 64 ;;
+    -*) printf '%s\n' "unknown option: $1" >&2; exit 64 ;;
     *)  break ;;
   esac
 done
@@ -104,24 +104,25 @@ target_owner="$2"
 ghorg_require_deps
 
 remote_url() {
-  local repo="$1"
+  local repo
+  repo="$1"
   case "$url_scheme" in
-    ssh)   printf 'git@github.com:%s/%s.git' "$target_owner" "$repo" ;;
-    https) printf 'https://github.com/%s/%s.git' "$target_owner" "$repo" ;;
+    ssh)   printf '%s' "git@github.com:${target_owner}/${repo}.git" ;;
+    https) printf '%s' "https://github.com/${target_owner}/${repo}.git" ;;
   esac
 }
 
 push_one() {
-  local repo_dir="$1"
-  local repo
+  local repo_dir repo url branch resolved_head safe_repo_dir
+  repo_dir="$1"
   repo="$(basename -- "$repo_dir")"
 
   ## Validate the directory-derived name before using it as a URL or
   ## API parameter. Same allowlist rules as for API-supplied names so
   ## a hostile filesystem can't smuggle bad names either.
   if ! ghorg_validate_name "$repo" repo; then
-    printf 'warn: skipping %s (invalid name)\n' \
-      "$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$repo_dir")" >&2
+    safe_repo_dir="$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$repo_dir")"
+    printf '%s\n' "warn: skipping $safe_repo_dir (invalid name)" >&2
     return 0
   fi
 
@@ -138,27 +139,26 @@ push_one() {
         ## Reserved flag for future use; deliberately not implemented to
         ## avoid surprise repo creation. github-org-fork is the supported
         ## path for adding repos to the target.
-        printf 'warn: %s/%s missing - run github-org-fork to create it; skipping\n' \
-          "$target_owner" "$repo" >&2
+        printf '%s\n' \
+          "warn: ${target_owner}/${repo} missing - run github-org-fork to create it; skipping" >&2
       else
-        printf 'warn: %s/%s does not exist on target, skipping\n' \
-          "$target_owner" "$repo" >&2
+        printf '%s\n' \
+          "warn: ${target_owner}/${repo} does not exist on target, skipping" >&2
       fi
       return 0
       ;;
     *)
-      printf 'error: %s/%s lookup failed (auth or transient); not pushing\n' \
-        "$target_owner" "$repo" >&2
+      printf '%s\n' \
+        "error: ${target_owner}/${repo} lookup failed (auth or transient); not pushing" >&2
       return 1
       ;;
   esac
 
-  local url
   url="$(remote_url "$repo")"
 
   if [ "$dry_run" = '1' ]; then
-    printf 'DRY-RUN: push %s -> %s (branches: %s, tags: %s)\n' \
-      "$repo_dir" "$url" "$branches" "$push_tags"
+    printf '%s\n' \
+      "DRY-RUN: push $repo_dir -> $url (branches: $branches, tags: $push_tags)"
     return 0
   fi
 
@@ -170,7 +170,6 @@ push_one() {
     git -C "$repo_dir" remote add "$remote_name" "$url"
   fi
 
-  local branch resolved_head
   for branch in $branches; do
     if [ "$branch" = 'HEAD' ]; then
       ## Resolve HEAD to a fully qualified ref locally first, so the
@@ -179,68 +178,87 @@ push_one() {
       ## refs/heads/<branch> for an attached HEAD; for a detached HEAD
       ## it returns non-zero, which we treat as "skip with warning".
       if ! resolved_head="$(git -C "$repo_dir" symbolic-ref HEAD 2>/dev/null)"; then
-        printf 'warn: %s: HEAD detached, skipping HEAD push\n' "$repo_dir" >&2
+        printf '%s\n' "warn: $repo_dir: HEAD detached, skipping HEAD push" >&2
         continue
       fi
-      [ "$verbose" = '1' ] && printf 'push %s %s -> %s\n' \
-        "$resolved_head" "$repo_dir" "$remote_name"
+      [ "$verbose" = '1' ] && printf '%s\n' \
+        "push $resolved_head $repo_dir -> $remote_name"
       git -C "$repo_dir" push -- "$remote_name" \
         "${resolved_head}:${resolved_head}" || \
-        printf 'warn: %s: %s push to %s failed\n' \
-          "$repo_dir" "$resolved_head" "$remote_name" >&2
+        printf '%s\n' \
+          "warn: $repo_dir: $resolved_head push to $remote_name failed" >&2
     else
       ## Validate the user-supplied branch name as a repo-name (same
       ## allowlist) before constructing a fully-qualified ref. This
       ## both blocks ref injection like `master HEAD` and prevents
       ## tag/branch ambiguity (we always use refs/heads/...).
       if ! ghorg_validate_name "$branch" repo; then
-        printf 'warn: %s: skipping invalid branch name\n' "$repo_dir" >&2
+        printf '%s\n' "warn: $repo_dir: skipping invalid branch name" >&2
         continue
       fi
-      [ "$verbose" = '1' ] && printf 'push %s %s -> %s\n' "$branch" "$repo_dir" "$remote_name"
+      [ "$verbose" = '1' ] && printf '%s\n' "push $branch $repo_dir -> $remote_name"
       git -C "$repo_dir" push -- "$remote_name" \
         "refs/heads/${branch}:refs/heads/${branch}" || \
-        printf 'warn: %s: branch %s push to %s failed\n' \
-          "$repo_dir" "$branch" "$remote_name" >&2
+        printf '%s\n' \
+          "warn: $repo_dir: branch $branch push to $remote_name failed" >&2
     fi
   done
 
   if [ "$push_tags" = '1' ]; then
-    [ "$verbose" = '1' ] && printf 'push --tags %s -> %s\n' "$repo_dir" "$remote_name"
+    [ "$verbose" = '1' ] && printf '%s\n' "push --tags $repo_dir -> $remote_name"
     git -C "$repo_dir" push --tags -- "$remote_name" || \
-      printf 'warn: %s: tag push to %s failed\n' "$repo_dir" "$remote_name" >&2
+      printf '%s\n' "warn: $repo_dir: tag push to $remote_name failed" >&2
   fi
 }
 
 main() {
+  local candidate_count active repo_dir base_name candidate_dir
+  local -a candidate_dirs
   if [ ! -d "$source_dir" ]; then
-    printf 'error: source dir does not exist: %s\n' "$source_dir" >&2
+    printf '%s\n' "error: source dir does not exist: $source_dir" >&2
     exit 1
   fi
 
   ## Discover candidate clones: every immediate subdir that has a .git.
-  local candidates
-  candidates="$(find "$source_dir" -mindepth 1 -maxdepth 1 -type d \
-    -exec test -e '{}/.git' \; -print | sort -u)"
+  ## NUL-delimited so directory names containing newlines or other
+  ## odd bytes survive intact (find -print0 + read -d ''). Subdirs
+  ## without a .git are filtered by the test on each entry.
+  candidate_dirs=()
+  while IFS= read -r -d '' candidate_dir; do
+    [ -e "${candidate_dir}/.git" ] || continue
+    candidate_dirs+=( "$candidate_dir" )
+  done < <(find "$source_dir" -mindepth 1 -maxdepth 1 -type d -print0 \
+    | sort --zero-terminated --unique)
 
   if [ -n "$include_re" ] || [ -n "$exclude_re" ]; then
-    candidates="$(printf '%s\n' "$candidates" | while IFS= read -r d; do
-      [ -z "$d" ] && continue
-      printf '%s\n' "$(basename -- "$d")"
-    done | ghorg_filter_names "$include_re" "$exclude_re" | while IFS= read -r name; do
-      printf '%s/%s\n' "$source_dir" "$name"
-    done)"
+    ## Filter by basename, then re-prefix with source_dir.
+    local -a filtered
+    local kept_names cand_basename
+    local names_in=''
+    for candidate_dir in "${candidate_dirs[@]}"; do
+      cand_basename="$(basename -- "$candidate_dir")"
+      names_in+="${cand_basename}"$'\n'
+    done
+    kept_names="$(printf '%s' "$names_in" \
+      | ghorg_filter_names "$include_re" "$exclude_re")"
+    filtered=()
+    while IFS= read -r base_name; do
+      [ -z "$base_name" ] && continue
+      filtered+=( "${source_dir}/${base_name}" )
+    done <<< "$kept_names"
+    candidate_dirs=( "${filtered[@]}" )
   fi
 
-  if [ -z "$candidates" ]; then
-    printf 'no git checkouts found under %s\n' "$source_dir" >&2
+  candidate_count="${#candidate_dirs[@]}"
+  if [ "$candidate_count" -eq 0 ]; then
+    printf '%s\n' "no git checkouts found under $source_dir" >&2
     return 0
   fi
 
-  printf '%s repos to process\n' "$(printf '%s\n' "$candidates" | wc -l)"
+  printf '%s\n' "$candidate_count repos to process"
 
-  local active=0
-  while IFS= read -r repo_dir; do
+  active=0
+  for repo_dir in "${candidate_dirs[@]}"; do
     [ -z "$repo_dir" ] && continue
     push_one "$repo_dir" &
     active=$(( active + 1 ))
@@ -248,7 +266,7 @@ main() {
       wait -n || true
       active=$(( active - 1 ))
     fi
-  done <<< "$candidates"
+  done
   wait
 }
 

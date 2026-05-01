@@ -16,7 +16,8 @@ shopt -s inherit_errexit
 shopt -s shift_verbose
 
 if [ "${CI:-}" != "true" ]; then
-   printf 'error: this script must run with CI=true (GitHub Actions or equivalent).\n' >&2
+   printf '%s\n' \
+      'error: this script must run with CI=true (GitHub Actions or equivalent).' >&2
    exit 1
 fi
 
@@ -37,19 +38,19 @@ unexpected=( old-archived some-fork private-thing )
 fail=0
 for repo in "${expected_repos[@]}"; do
   if ! grep --quiet -- "DRY-RUN: clone .*${repo}\.git" <<< "$out"; then
-    printf 'FAIL: expected %s in dry-run output\n' "$repo" >&2
+    printf '%s\n' "FAIL: expected $repo in dry-run output" >&2
     fail=1
   fi
 done
 for repo in "${unexpected[@]}"; do
   if grep --quiet -- "DRY-RUN: clone .*${repo}\.git" <<< "$out"; then
-    printf 'FAIL: %s should be filtered out\n' "$repo" >&2
+    printf '%s\n' "FAIL: $repo should be filtered out" >&2
     fail=1
   fi
 done
 
 if ! grep --quiet -- '^2 repos to process' <<< "$out"; then
-  printf 'FAIL: expected "2 repos to process" header\n' >&2
+  printf '%s\n' 'FAIL: expected "2 repos to process" header' >&2
   fail=1
 fi
 
