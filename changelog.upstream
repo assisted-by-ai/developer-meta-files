@@ -1,3 +1,501 @@
+commit 2aac444914694c9bd559ac3905a2311c3d2ce1ae
+Merge: ddaed18 29cdc3b
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Fri May 1 06:20:25 2026 -0400
+
+    Merge remote-tracking branch 'assisted-by-ai/claude/style-and-org-vars-X9b1n'
+
+commit 29cdc3beab923cf7fda7e9a32ac75a129af88649
+Author: Claude <noreply@anthropic.com>
+Date:   Fri May 1 10:14:04 2026 +0000
+
+    remove AI-tell comments (style/refactor meta narration)
+
+    Strip comments that document the SHAPE of the code or the history of
+    how it got there, rather than non-obvious behaviour or hidden
+    constraints. The exact category the user flagged:
+
+      * "Trap target / Standalone function ... so the trap is auditable"
+        headers above each cleanup function. The fact that the function
+        is named and called from `trap NAME SIG` is self-evident.
+        Removed in github-org-lib.bsh, dm-github-policy,
+        ci/probe-live-unauth.sh, ci/tests/test_rate_limit_retry.sh.
+
+    Other AI-tell categories found and trimmed:
+
+      * Style/refactor justifications: "Standalone function (not an
+        inline command string)", "belt and braces", "Defense-in-depth
+        against hostile origins", "Reads better, surfaces intermediate
+        names", "even though no operand is an option here". Either
+        deleted outright or compressed to one line of substantive
+        rationale.
+
+      * Self-referential refactor history: "Avoids the previous
+        \"comm -23 <(printf ...) <(printf ...)\" form, which ran printf
+        in two process substitutions whose exit codes errexit could
+        not see"; "Replaced with a small helper"; "Same set-
+        intersection idea, in pure bash". Belongs in commit messages
+        and PR descriptions, not the source.
+
+      * Verbose threat-model exposition: trimmed the THREAT MODEL block
+        in github-org-lib.bsh from a 56-line essay to ~15 lines. The
+        actual policy (validate at identifier sinks, sanitize at
+        display sinks) is what matters; the why-this-policy paragraphs
+        were re-stating the obvious for an AI reviewer.
+
+      * Per-tunable doc bloat: each GHORG_MAX_* knob had a multi-line
+        paragraph. Compressed each to one short comment plus the
+        assignment.
+
+      * Step-by-step "## Verified against the OpenAPI spec ..." in
+        apply_org_policy step 4: removed; the kept body fields ARE
+        the verified set, listing them again as "present:" is noise.
+
+      * "## TODO: replace with real API calls when GitHub publishes
+        stable REST endpoints" + "## Sample of what would be set if a
+        stable REST surface existed" with a commented-out body block.
+        Both removed: the skip+UI URL is the actual behaviour; a
+        speculative future API does not need to be carried as dead
+        JSON in the source.
+
+      * "## install_line is jq-extracted from an untrusted body
+        (.app_slug + .id concatenated). Sanitize before display." -
+        redundant with the variable name `safe_install_line` and the
+        call to ghorg_safe_print on the next line.
+
+      * Comment paraphrasing the function name: "## Records a SKIP
+        event. Used by apply_org_policy for settings that have no
+        REST API". Removed; record_skip() { api_record skip; } speaks
+        for itself.
+
+    What is KEPT (still valuable, not AI-tell):
+      * Real invariants and gotchas: PIPE_BUF atomicity for the
+        counter tempfile; @{u} ref ambiguity protection; the leading-
+        dot exception for .github / .gitignore validation.
+      * External-system references: HTTP 409 on selected-actions when
+        allowed_actions != "selected"; OpenAPI spec field availability
+        notes where they shape the body.
+      * Args/returns docstrings for non-trivial functions.
+
+    AI-Assisted
+
+commit ddaed1899ad352eea175481d8563817af6c655ba
+Merge: bfb0aef ec4d43a
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Fri May 1 06:12:20 2026 -0400
+
+    Merge remote-tracking branch 'assisted-by-ai/claude/style-and-org-vars-X9b1n'
+
+commit bfb0aef9170ea0be85de3f569b304745c372b19f
+Merge: 23a1b1a 8a83cb4
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Fri May 1 06:11:03 2026 -0400
+
+    Merge remote-tracking branch 'assisted-by-ai/claude/style-and-org-vars-X9b1n'
+
+commit ec4d43a40262d960f858e842f284fba31bc6ebc7
+Author: Claude <noreply@anthropic.com>
+Date:   Fri May 1 10:01:58 2026 +0000
+
+    github-org-fork: pure-bash set diff/intersect; lib: capture jq output
+
+    Two coordinated changes to remove subshell-via-process-substitution
+    patterns whose exit codes were invisible to errexit + pipefail.
+
+      * github-org-fork main(): the previous "missing" / "to_configure"
+        set computations used "comm -23 <(printf ...) <(printf ...)" and
+        "comm -12 <(printf ...) <(printf ...)". The two process subs
+        each ran in their own subshell whose failure could not surface
+        to the parent; a printf failure inside one would silently feed
+        comm an empty stream, making the operator think a source-only
+        or shared-set was empty.
+
+        Replaced with a small helper, fork_main_build_repo_set, that
+        populates a passed-by-name associative array from a newline-
+        separated string. main() builds target_set once, computes
+        "missing" by absence-from-set, and "to_configure" by
+        presence-in-set. Both are local arrays. No external comm, no
+        process subs.
+
+        The "${target_set[${repo_name}]:-}" subscript needs the :- form
+        because bash's set -o nounset triggers on associative-array
+        subscripts of unset keys; documented inline as a "the absence
+        IS the signal" case rather than a default-hides-a-bug case.
+
+        Variable names use repo_name throughout (the previous "$r" was
+        rejected as too short).
+
+      * github-org-lib.bsh ghorg_list_repos: the "while IFS= read -r ...
+        done < <(printf | jq)" loop pre-captures jq output into a
+        names_text string first, then iterates with "<<< \${names_text}".
+        Same rationale: with errexit + pipefail + inherit_errexit, the
+        "$( ... )" capture surfaces a jq failure; the prior "<( ... )"
+        form silently treated jq failure as an empty page.
+
+    Note on the remaining "<()" cases (not changed in this commit, kept
+    as-is by judgment):
+
+      - github-org-push main(): "find ... -print0 | sort --zero-terminated"
+        feeds NUL-delimited candidate dirs into a "read -d ''" loop. NUL-
+        safe pre-capture via "$( ... )" is not possible (bash strings
+        can not contain NUL). A tempfile-based variant is the
+        error-aware alternative; deferred for now since "find" rarely
+        exits non-zero in practice (it warns on per-entry permission
+        failures rather than aborting).
+
+      - ci/tests/test_shellcheck_clean.sh: same pattern as above for
+        enumerating test files. Same trade-off, same deferral. If the
+        enumerator silently fails, we run shellcheck on zero files and
+        the test passes - a quiet false negative. Worth a follow-up
+        tempfile fix.
+
+    AI-Assisted
+
+commit 23a1b1a88dabcff056fc7caa09f7a079af489ebb
+Merge: c51acf1 116d9fd
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Fri May 1 05:56:48 2026 -0400
+
+    Merge remote-tracking branch 'assisted-by-ai/claude/style-and-org-vars-X9b1n'
+
+commit 8a83cb447d7a1fb6ae61ac0e7a4b8e393d5b5b3c
+Author: Claude <noreply@anthropic.com>
+Date:   Fri May 1 09:55:39 2026 +0000
+
+    style: quote interpolated values; [[ -v ]] for env defaults; JSON exception
+
+    Three coordinated style refinements after the previous big sweep.
+
+      * Single-quote-around-vars in error/warn/reject messages: every
+        interpolated value that flows into a diagnostic string is now
+        wrapped in single quotes, e.g. "error: '${path}' permissions are
+        '${mode}', expected 600 or 400". A reader sees the exact byte
+        boundary of the variable's value, including any leading or
+        trailing whitespace, and "it's a variable" is unambiguous from
+        the surrounding literal text. Applied across the lib (token
+        file, validator, account_type, list_repos, repo_lookup,
+        repo_parent, authenticated_user, retry warns) and across
+        github-org-clone / -fork / -push / -set-fork-approval and
+        dm-github-policy. test_set_fork_approval_user_refused.sh's
+        grep needle is updated to match the new quoted phrasing.
+
+      * Env-var defaults via "[[ -v VAR ]] || VAR=...": each tunable
+        knob in github-org-lib.bsh now uses bash's "is set" test
+        instead of the "${VAR:-default}" inline-default form. Keeps
+        the assignment line scannable and surfaces the default value
+        plainly. Applied to GHORG_API, GHORG_MAX_RETRIES,
+        GHORG_MAX_BACKOFF_SECONDS, GHORG_MAX_PAGES, GHORG_MAX_REDIRS.
+
+      * JSON-literal printf exception: ghorg_mock_dispatch's missing-
+        fixture error body is a JSON string with embedded double
+        quotes. The project-wide rule ("printf '%s\n' \"...\"") would
+        require backslash-escaping every internal quote. The cleaner
+        form for this case is the format-spec with %s placeholders -
+        documented inline as the explicit exception to the rule.
+
+    AI-Assisted
+
+commit c51acf11e6b7fb94d180d296c0c1d7c18e0e0e84
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Fri May 1 09:49:42 2026 +0000
+
+    bumped changelog version
+
+commit 2a2129aa4c608ab6a9122e983b88365b688316aa
+Author: Claude <noreply@anthropic.com>
+Date:   Fri May 1 09:47:34 2026 +0000
+
+    style: braced \${var}, split case arms, helper-scripts via env, MIRROR rename
+
+    A coordinated style sweep across the AI-Assisted github-org-* /
+    dm-github-policy / dm-fork-sync surface plus the CI scripts that
+    exercise it.
+
+      * Variable expansion: every "\$var" reference is now "\${var}".
+        Easier to spot the boundary between identifier and surrounding
+        text. Existing "\${var:-default}" forms are kept where they were
+        needed for nounset safety; no new "\${var:-}" defaults were added.
+
+      * Case arms: every multi-statement single-line case arm is split
+        onto separate lines, with ";;" on its own line. Includes the
+        main arg parsers in github-org-clone / -fork / -push /
+        -set-fork-approval / dm-fork-sync / dm-github-policy plus the
+        nested --actions / --workflow-perms case in github-org-fork and
+        the status-code switches in ghorg_repo_lookup / fork_one /
+        ghorg_validate_name's kind dispatch / ghorg_list_repos's
+        account-type dispatch.
+
+      * Helper-scripts source: github-org-clone now sources wc-test.sh
+        via "\${HELPER_SCRIPTS_PATH:-}/usr/libexec/helper-scripts/...",
+        matching the existing convention. Empty default = system
+        install at /usr/libexec/helper-scripts/; an in-tree caller
+        (e.g. derivative-maker running with helper-scripts as a
+        submodule) can point at the submodule instead.
+
+      * MIRROR rename: dm-packaging-helper-script's
+        DM_GITHUB_TEST_MIRROR / DM_GITHUB_PROD_MIRROR pair collapses to
+        a single DM_GITHUB_MIRROR='org-ai-assisted'. The org IS the
+        production mirror; the previous "test mirror" framing was
+        inaccurate. The deprecated assisted-by-ai personal-account
+        remote is dropped from pkg_git_remotes_add since that account
+        is being phased out (kept only for org-ai-assisted admin).
+
+      * dm-fork-sync: MIRROR='org-ai-assisted' (was assisted-by-ai),
+        SOURCE_ORGS=( 'Kicksecure' 'Whonix' ) (production list active).
+        Help text and header comments updated to match.
+
+      * Lib globals: each environment-overridable knob now has its own
+        standalone comment block followed by the assignment then a
+        blank line. GHORG_MAX_REPO_NAME_LEN / _USER_LOGIN_LEN /
+        _DISPLAY_LEN / _RETRIES / _BACKOFF_SECONDS / _PAGES / _REDIRS /
+        _ID_LEN are all visually separated.
+
+    AI-Assisted
+
+commit c592c7aaee1a375a77daf61b824b3271a2cc5da4
+Author: Claude <noreply@anthropic.com>
+Date:   Fri May 1 09:32:55 2026 +0000
+
+    style: globals at top, blank line after locals, no \n in printf format
+
+    Two consistent style changes across the github-org-* / dm-* tools and
+    their CI scripts:
+
+      * Globals consolidated at the top of github-org-lib.bsh in a single
+        GLOBALS block: GHORG_API, GHORG_MAX_REPO_NAME_LEN /
+        GHORG_MAX_USER_LOGIN_LEN / GHORG_MAX_DISPLAY_LEN, GHORG_MAX_RETRIES /
+        GHORG_MAX_BACKOFF_SECONDS, GHORG_MAX_PAGES / GHORG_MAX_REDIRS /
+        GHORG_MAX_ID_LEN, ghorg_account_type_cache, and
+        ghorg_authenticated_user_cached. Previously they were sprinkled
+        throughout the file in front of the function that first used them;
+        now a reader sees the full state surface at a glance. Each function
+        that uses them comments back-references to the globals block.
+
+      * Blank line after every "local" declaration block, and a blank
+        line after the parameter-assignment block before logic begins.
+        Matches the dm-packaging-helper-script convention. Applies to
+        every function in the suite (~25 functions touched).
+
+      * No extra "\n" in printf format strings. "printf '\n%s\n' ..."
+        rewrites to a separate "printf '%s\n' \"\"" for the blank line
+        plus the actual content printf. Multi-line content where each
+        line is logically distinct uses one printf per line; multi-line
+        content that reads as a single block (e.g. skip-with-URL-pointer
+        messages) uses a single double-quoted string with embedded
+        newlines so only one open/close quote pair is required. The
+        summary block in dm-github-policy main() is the canonical
+        "one-printf-per-line" example.
+
+    AI-Assisted
+
+commit 116d9fd1741f55717c06b50ccb1d7f47faa30f82
+Author: Claude <noreply@anthropic.com>
+Date:   Fri May 1 08:47:03 2026 +0000
+
+    hostile-API hardening: pagination, redirect, id-length, LFS, git protos
+
+    Five additional defenses against a compromised or hostile GitHub
+    REST endpoint, on top of the existing ghorg_validate_name allowlist
+    and ghorg_safe_print sanitize-string layer:
+
+      * GHORG_MAX_PAGES (default 100) caps pagination depth in
+        ghorg_list_repos. Without it, a server returning 100 repos per
+        page forever would keep the pager loop alive until OOM. The cap
+        fires with a clear warn line so the operator can investigate
+        rather than silently truncating the result set.
+
+      * --max-redirs GHORG_MAX_REDIRS (default 5) bounds curl's redirect
+        chain. Modern curl strips Authorization on cross-host redirect
+        by default, so the token does not leak; this cap is for the
+        request URL itself (which carries the org name and path) being
+        bounced through attacker-controlled hosts.
+
+      * GHORG_MAX_ID_LEN (20) caps the byte length of any "numeric" id
+        extracted from a body before it is interpolated into a URL path.
+        The existing ^[0-9]+$ regex would otherwise accept a 10000-digit
+        string. Applied to ruleset id and code-security configuration id
+        in dm-github-policy.
+
+      * GIT_LFS_SKIP_SMUDGE=1 in github-org-clone's git clone env
+        prevents the LFS smudge filter from auto-fetching attacker-
+        chosen objects when an upstream's .gitattributes points binary
+        files at LFS. Operators who want LFS payloads can pre-set the
+        env var to anything other than 1.
+
+      * git clone --config protocol.file.allow=never and
+        protocol.ext.allow=never block the file:// and ext:: helper
+        protocols, which have been used in past CVEs to read local
+        files or run shell commands on clone when a hostile upstream
+        redirects a sub-fetch.
+
+    The threat-model header in github-org-lib.bsh now lists every
+    resource cap and clone-time hardening so future readers see the
+    defenses inline with the validate-at-sinks / sanitize-at-display
+    boundary.
+
+    AI-Assisted
+
+commit 8506b20647d18d086c4f8911d2c426cd2535806c
+Author: Claude <noreply@anthropic.com>
+Date:   Thu Apr 30 23:26:47 2026 +0000
+
+    project-wide style sweep: printf, jq/sed/tr --, safe-rm, wc-test
+
+    Mechanical sweep across the github-org-* / dm-github-policy /
+    dm-packaging-helper-script tools and their CI scripts:
+
+      * printf style: every "printf 'TEXT %s\n' \"\$var\"" is rewritten as
+        "printf '%s\n' \"TEXT \$var\"". The format string is now a fixed
+        literal in every call; variables only appear inside the data
+        string, never inside the format. printf '%s\r\n' is used in the
+        rate-limit fixtures where CRLF is required structurally.
+
+      * end-of-options separators: jq, sed, tr now pass "--" before the
+        filter / script / set arg. Same defensive idiom we already used
+        on git, grep, head, tail.
+
+      * "true MSG" debug: bare "true" placeholders inside ghorg_api retry
+        case arms are now "true 'INFO: ...'" so the comment text shows up
+        in xtrace, matching the dm-packaging-helper-script convention.
+
+      * trap nounset safety: documented in the trap-target function
+        header that hdr_file (etc.) is initialized BEFORE the trap is
+        registered, so the bare "$hdr_file" reference is safe under
+        "set -o nounset" and no "${hdr_file:-}" default is needed (using
+        one would mask a real init-order regression).
+
+      * safe-rm everywhere: the four "rm" calls left in the suite (lib
+        trap target, dm-github-policy trap target, ci/test-github-org-
+        tools.sh per-test cleanup, and the two ci/tests trap targets)
+        now call safe-rm with long flags (--force / --recursive). The
+        apt install lists in policy-live.yml and test-github-org-tools.yml
+        pick up the safe-rm package.
+
+      * wc-test.sh sourced before wc: github-org-clone now sources
+        /usr/libexec/helper-scripts/wc-test.sh up front so a broken wc
+        binary fails loudly rather than silently producing an empty
+        line count. wc -l rewritten as wc --lines.
+
+      * dm-packaging-helper-script: the inline "assisted-by-ai" and
+        "org-ai-assisted" strings I added in the previous round are now
+        DM_GITHUB_PROD_MIRROR and DM_GITHUB_TEST_MIRROR readonly vars
+        declared near the top of the script. The pkg_git_remotes_add /
+        set_batch_current_package_remote_list bodies reference the vars
+        instead of repeating the literal.
+
+    AI-Assisted
+
+commit b68d762ca1afe9e47e5292c7f409f0ef9969a725
+Author: Claude <noreply@anthropic.com>
+Date:   Thu Apr 30 22:52:52 2026 +0000
+
+    ci/probe-live-unauth.sh: split rm -rf into rm -r -f
+
+    Match the existing convention in dm-qubes-repo-temp / dm-prepare-release
+    (uncombined short flags) so all rm calls in the suite read the same.
+
+    AI-Assisted
+
+commit 15eb9b93d06c3f83b8eee8fd513e71f53ac3e8cf
+Author: Claude <noreply@anthropic.com>
+Date:   Thu Apr 30 22:49:15 2026 +0000
+
+    github-org-* + dm-github-policy: style + threat-model polish
+
+    Across the github-org-* / dm-github-policy / dm-packaging-helper-script
+    surface and the CI scripts that exercise it:
+
+      * printf style: command substitutions previously inlined as printf
+        arguments are now hoisted to a named variable on a preceding line.
+        Reads better and avoids burying the substitution.
+
+      * local declarations: per-function locals are declared on a single
+        "local var1 var2 var3" line at the top, then assigned. Drops the
+        "local x=$(cmd)" pattern, which masks cmd's exit code because
+        local always returns 0. Trivial assignments such as "local i=0"
+        are kept inline.
+
+      * Bot/test mirror as variables: the inline "assisted-by-ai" and
+        "org-ai-assisted" strings in dm-packaging-helper-script are now
+        DM_GITHUB_PROD_MIRROR and DM_GITHUB_TEST_MIRROR readonly vars
+        declared near the top of the script. dm-fork-sync and
+        dm-github-policy already had MIRROR / SOURCE_ORGS / ORGS at top.
+
+      * Standalone trap functions: every "trap '<inline cmd>' <SIG>" is
+        now "trap <named_function> <SIG>" with the function defined in
+        the same file. Auditable as a callable, not a quoted snippet.
+
+      * sanitize-string audit: every jq-extracted scalar that flows to
+        a terminal now passes through ghorg_safe_print first (allowed_actions,
+        enabled_repositories, PAT counts, webhook counts, install_line).
+        A new THREAT MODEL block at the top of github-org-lib.bsh
+        documents the "validate at identifier sinks, sanitize at display
+        sinks" boundary and explains why we don't sanitize the raw body
+        (it must be parsed by jq first).
+
+      * NUL-delimited find: github-org-push discovers candidate clones
+        via "find ... -print0 | sort --zero-terminated" and reads them
+        with "read -d ''", so dirnames containing odd bytes survive.
+
+      * Long option names: declare -gA -> declare -g -A; sort -u ->
+        sort --unique. shellcheck/Bash long forms preferred everywhere
+        they are documented.
+
+      * end-of-options "--": stat invocations now pass -- before the
+        file path so an attacker-controlled XDG_CONFIG_HOME path that
+        happens to start with "-" cannot be mistaken for a flag.
+
+      * Quoted reserved-name patterns: ".|..|.git" in case statements
+        is now "'.'|'..'|'.git'" (and the "-*" / "*..*" arms gained the
+        same explicit quoting). Defensive even though dot is not a
+        glob char in case patterns.
+
+      * Replaced ":" null-command with "true" in github-org-lib.bsh
+        (while-true loop, retry case arms, hdr_file truncation). Easier
+        to read at a glance than the colon idiom.
+
+      * Documented ghorg_filter_names empty-pattern semantics: empty =
+        "no filter on this side" by intent, scoped to repo-name filtering
+        where include='' / exclude='' is the natural CLI default; not a
+        generic security filter.
+
+    AI-Assisted
+
+commit fe4e618dc1ececf18e02bc70112992d8afd3ba14
+Author: Claude <noreply@anthropic.com>
+Date:   Thu Apr 30 22:07:47 2026 +0000
+
+    combine audit-live + dryrun-live into single policy-live workflow
+
+    One workflow_dispatch click, one job, two sequential steps:
+    --audit then --dry-run. If --audit fails the dry-run step does not
+    run (default GitHub Actions ordering). Same GHORG_AUDIT_TOKEN
+    read-only secret as before.
+
+    Renames audit-live.yml -> policy-live.yml; deletes the just-added
+    dryrun-live.yml (never released).
+
+    AI-Assisted
+
+commit b32bcd8e61370b411a17098c6630923fbdceaa9a
+Author: Claude <noreply@anthropic.com>
+Date:   Thu Apr 30 21:55:00 2026 +0000
+
+    dm-github-policy: audit polish + add live dry-run workflow
+
+    audit: when allowed_actions is not "selected", GitHub returns HTTP
+    409 on /actions/permissions/selected-actions. Capture the value
+    inline from /actions/permissions and only call the selected-actions
+    endpoint when allowed_actions=selected; otherwise print "(N/A while
+    allowed_actions=X)" instead of a noisy HTTP 409.
+
+    workflow: add .github/workflows/dryrun-live.yml mirroring
+    audit-live.yml but invoking dm-github-policy --dry-run. Reuses the
+    existing GHORG_AUDIT_TOKEN read-only secret since dry-run only
+    issues GET requests and prints the writes it would make.
+
+    AI-Assisted
+
 commit d87b3d7ed6c9c44df9742229e8a71fb43022139d
 Author: Patrick Schleizer <adrelanos@whonix.org>
 Date:   Thu Apr 30 18:13:58 2026 -0400
