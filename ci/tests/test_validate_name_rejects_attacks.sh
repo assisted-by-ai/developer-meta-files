@@ -57,8 +57,8 @@ fail=0
 ## dash (arg injection) and embedded ".." (path traversal).
 for valid_name in derivative-maker helper-scripts foo_bar foo.bar foo-bar1 a \
                   .github .gitignore .hidden; do
-   if ! ghorg_validate_name "$valid_name" repo 2>/dev/null; then
-      printf '%s\n' "FAIL: rejected good name: $valid_name" >&2
+   if ! ghorg_validate_name "${valid_name}" repo 2>/dev/null; then
+      printf '%s\n' "FAIL: rejected good name: ${valid_name}" >&2
       fail=1
    fi
 done
@@ -69,23 +69,23 @@ done
 bad_names=( '' '.git' '..' '.' '-flag' '../etc'
             'foo..bar' 'foo/bar' 'foo bar' )
 for bad_name in "${bad_names[@]}"; do
-   if ghorg_validate_name "$bad_name" repo 2>/dev/null; then
-      bad_name_q="$(printf '%q' "$bad_name")"
-      printf '%s\n' "FAIL: accepted bad pattern: $bad_name_q" >&2
+   if ghorg_validate_name "${bad_name}" repo 2>/dev/null; then
+      bad_name_q="$(printf '%q' "${bad_name}")"
+      printf '%s\n' "FAIL: accepted bad pattern: ${bad_name_q}" >&2
       fail=1
    fi
 done
 
 ## Length cap: 100 OK, 101 reject.
 ok_100chars="$(printf 'a%.0s' {1..100})"
-if ! ghorg_validate_name "$ok_100chars" repo 2>/dev/null; then
+if ! ghorg_validate_name "${ok_100chars}" repo 2>/dev/null; then
    printf '%s\n' 'FAIL: rejected 100-char name' >&2
    fail=1
 fi
 overlong_101chars="$(printf 'a%.0s' {1..101})"
-if ghorg_validate_name "$overlong_101chars" repo 2>/dev/null; then
+if ghorg_validate_name "${overlong_101chars}" repo 2>/dev/null; then
    printf '%s\n' 'FAIL: accepted 101-char name (over cap)' >&2
    fail=1
 fi
 
-exit "$fail"
+exit "${fail}"

@@ -23,10 +23,10 @@ if [ "${CI:-}" != "true" ]; then
 fi
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
-FIXTURE_DIR="$(cd -- "$SCRIPT_DIR/../fixtures" && pwd)"
+FIXTURE_DIR="$(cd -- "${SCRIPT_DIR}/../fixtures" && pwd)"
 
 export GHORG_MOCK=1
-export GHORG_MOCK_DIR="$FIXTURE_DIR"
+export GHORG_MOCK_DIR="${FIXTURE_DIR}"
 
 out="$(dm-github-policy --audit 2>&1)"
 
@@ -50,16 +50,16 @@ required=(
 )
 
 for needle in "${required[@]}"; do
-   if ! grep --quiet --fixed-strings -- "$needle" <<< "$out"; then
-      printf '%s\n' "FAIL: missing expected fragment: $needle" >&2
+   if ! grep --quiet --fixed-strings -- "${needle}" <<< "${out}"; then
+      printf '%s\n' "FAIL: missing expected fragment: ${needle}" >&2
       fail=1
    fi
 done
 
 ## Audit must NEVER print DRY-RUN: prefixes (those are apply-mode).
-if grep --quiet -- 'DRY-RUN:' <<< "$out"; then
+if grep --quiet -- 'DRY-RUN:' <<< "${out}"; then
    printf '%s\n' 'FAIL: --audit unexpectedly printed DRY-RUN: lines' >&2
    fail=1
 fi
 
-exit "$fail"
+exit "${fail}"

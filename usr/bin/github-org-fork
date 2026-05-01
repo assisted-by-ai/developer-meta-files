@@ -64,7 +64,7 @@ Options:
   -h, --help           show this help and exit
 
 Auth:
-  $GITHUB_TOKEN env var, or chmod-600 ~/.config/github-token. Token
+  ${GITHUB_TOKEN} env var, or chmod-600 ~/.config/github-token. Token
   needs `repo` scope; for --actions or --workflow-perms it also needs
   `workflow`.
 EOF
@@ -72,32 +72,85 @@ EOF
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --include-private)  include_private=1; shift ;;
-    --include-archived) include_archived=1; shift ;;
-    --include-forks)    include_forks=1; shift ;;
-    --include) include_re="$2"; shift 2 ;;
-    --exclude) exclude_re="$2"; shift 2 ;;
-    --disable-issues)   disable_issues=1; shift ;;
-    --disable-wiki)     disable_wiki=1; shift ;;
-    --disable-projects) disable_projects=1; shift ;;
+    --include-private)
+      include_private=1
+      shift
+      ;;
+    --include-archived)
+      include_archived=1
+      shift
+      ;;
+    --include-forks)
+      include_forks=1
+      shift
+      ;;
+    --include)
+      include_re="$2"
+      shift 2
+      ;;
+    --exclude)
+      exclude_re="$2"
+      shift 2
+      ;;
+    --disable-issues)
+      disable_issues=1
+      shift
+      ;;
+    --disable-wiki)
+      disable_wiki=1
+      shift
+      ;;
+    --disable-projects)
+      disable_projects=1
+      shift
+      ;;
     --actions)
-      case "$2" in enable|disable|leave) actions_state="$2" ;;
-        *) printf '%s\n' "invalid --actions value: $2" >&2; exit 64 ;;
+      case "$2" in
+        enable|disable|leave)
+          actions_state="$2"
+          ;;
+        *)
+          printf '%s\n' "invalid --actions value: '$2'" >&2
+          exit 64
+          ;;
       esac
       shift 2
       ;;
     --workflow-perms)
-      case "$2" in read|write|leave) workflow_perms="$2" ;;
-        *) printf '%s\n' "invalid --workflow-perms value: $2" >&2; exit 64 ;;
+      case "$2" in
+        read|write|leave)
+          workflow_perms="$2"
+          ;;
+        *)
+          printf '%s\n' "invalid --workflow-perms value: '$2'" >&2
+          exit 64
+          ;;
       esac
       shift 2
       ;;
-    --dry-run) dry_run=1; shift ;;
-    -v|--verbose) verbose=1; shift ;;
-    -h|--help) show_help; exit 0 ;;
-    --) shift; break ;;
-    -*) printf '%s\n' "unknown option: $1" >&2; exit 64 ;;
-    *)  break ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    -v|--verbose)
+      verbose=1
+      shift
+      ;;
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      printf '%s\n' "unknown option: '$1'" >&2
+      exit 64
+      ;;
+    *)
+      break
+      ;;
   esac
 done
 
@@ -121,33 +174,39 @@ ghorg_require_deps
 fork_one() {
   local repo target_type body auth_user result status
   local safe_target safe_auth
+
   repo="$1"
-  ghorg_validate_name "$repo" repo || return 1
-  target_type="$(ghorg_account_type "$target_owner")" || return 1
-  if [ "$target_type" = 'Organization' ]; then
-    body="$(jq -n --arg org "$target_owner" -- \
+
+  ghorg_validate_name "${repo}" repo || return 1
+
+  target_type="$(ghorg_account_type "${target_owner}")" || return 1
+
+  if [ "${target_type}" = 'Organization' ]; then
+    body="$(jq -n --arg org "${target_owner}" -- \
       '{organization: $org, default_branch_only: false}')"
   else
     auth_user="$(ghorg_authenticated_user)" || return 1
-    if [ "$auth_user" != "$target_owner" ]; then
-      safe_target="$(ghorg_safe_print "$GHORG_MAX_USER_LOGIN_LEN" "$target_owner")"
-      safe_auth="$(ghorg_safe_print "$GHORG_MAX_USER_LOGIN_LEN" "$auth_user")"
+    if [ "${auth_user}" != "${target_owner}" ]; then
+      safe_target="$(ghorg_safe_print "${GHORG_MAX_USER_LOGIN_LEN}" "${target_owner}")"
+      safe_auth="$(ghorg_safe_print "${GHORG_MAX_USER_LOGIN_LEN}" "${auth_user}")"
       printf '%s\n' \
-        "error: target user $safe_target does not match auth user $safe_auth; refusing to fork" >&2
+        "error: target user '${safe_target}' does not match auth user '${safe_auth}'; refusing to fork" >&2
       return 1
     fi
     body="$(jq -n -- '{default_branch_only: false}')"
   fi
-  if [ "$dry_run" = '1' ]; then
+  if [ "${dry_run}" = '1' ]; then
     printf '%s\n' "DRY-RUN: fork ${source_owner}/${repo} -> ${target_owner}/${repo}"
     return 0
   fi
-  result="$(ghorg_api POST "/repos/${source_owner}/${repo}/forks" "$body")"
-  status="$(ghorg_status_of "$result")"
-  case "$status" in
-    202|201) printf '%s\n' "forked: ${source_owner}/${repo} -> ${target_owner}/${repo}" ;;
+  result="$(ghorg_api POST "/repos/${source_owner}/${repo}/forks" "${body}")"
+  status="$(ghorg_status_of "${result}")"
+  case "${status}" in
+    202|201)
+      printf '%s\n' "forked: ${source_owner}/${repo} -> ${target_owner}/${repo}"
+      ;;
     *)
-      printf '%s\n' "error: fork ${source_owner}/${repo}: HTTP $status" >&2
+      printf '%s\n' "error: fork '${source_owner}/${repo}': HTTP '${status}'" >&2
       return 1
       ;;
   esac
@@ -161,15 +220,18 @@ fork_one() {
 ## to do (rename, archive, or accept).
 check_collision() {
   local repo parent expected safe_repo safe_parent safe_expected
+
   repo="$1"
-  parent="$(ghorg_repo_parent "$target_owner" "$repo")" || return 0
+
+  parent="$(ghorg_repo_parent "${target_owner}" "${repo}")" || return 0
   expected="${source_owner}/${repo}"
-  if [ -n "$parent" ] && [ "$parent" != "$expected" ]; then
-    safe_repo="$(ghorg_safe_print "$GHORG_MAX_REPO_NAME_LEN" "$repo")"
-    safe_parent="$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$parent")"
-    safe_expected="$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$expected")"
+
+  if [ -n "${parent}" ] && [ "${parent}" != "${expected}" ]; then
+    safe_repo="$(ghorg_safe_print "${GHORG_MAX_REPO_NAME_LEN}" "${repo}")"
+    safe_parent="$(ghorg_safe_print "${GHORG_MAX_DISPLAY_LEN}" "${parent}")"
+    safe_expected="$(ghorg_safe_print "${GHORG_MAX_DISPLAY_LEN}" "${expected}")"
     printf '%s\n' \
-      "warn: collision: ${target_owner}/${safe_repo} exists as fork of $safe_parent, expected $safe_expected" >&2
+      "warn: collision: '${target_owner}/${safe_repo}' exists as fork of '${safe_parent}', expected '${safe_expected}'" >&2
   fi
 }
 
@@ -178,57 +240,58 @@ check_collision() {
 ## flags were passed.
 configure_one() {
   local repo patch enabled body result status
+
   repo="$1"
 
   ## Repo settings PATCH only sent if at least one toggle was requested.
-  if [ "$disable_issues$disable_wiki$disable_projects" != '000' ]; then
+  if [ "${disable_issues}${disable_wiki}${disable_projects}" != '000' ]; then
     patch='{}'
-    [ "$disable_issues"   = '1' ] && patch="$(printf '%s' "$patch" | jq -- '. + {has_issues: false}')"
-    [ "$disable_wiki"     = '1' ] && patch="$(printf '%s' "$patch" | jq -- '. + {has_wiki: false}')"
-    [ "$disable_projects" = '1' ] && patch="$(printf '%s' "$patch" | jq -- '. + {has_projects: false}')"
-    if [ "$dry_run" = '1' ]; then
-      printf '%s\n' "DRY-RUN: PATCH ${target_owner}/${repo} $patch"
+    [ "${disable_issues}"   = '1' ] && patch="$(printf '%s' "${patch}" | jq -- '. + {has_issues: false}')"
+    [ "${disable_wiki}"     = '1' ] && patch="$(printf '%s' "${patch}" | jq -- '. + {has_wiki: false}')"
+    [ "${disable_projects}" = '1' ] && patch="$(printf '%s' "${patch}" | jq -- '. + {has_projects: false}')"
+    if [ "${dry_run}" = '1' ]; then
+      printf '%s\n' "DRY-RUN: PATCH ${target_owner}/${repo} ${patch}"
     else
-      result="$(ghorg_api PATCH "/repos/${target_owner}/${repo}" "$patch")"
-      status="$(ghorg_status_of "$result")"
-      [ "$status" != '200' ] && \
-        printf '%s\n' "warn: PATCH ${target_owner}/${repo}: HTTP $status" >&2
-      [ "$verbose" = '1' ] && [ "$status" = '200' ] && \
-        printf '%s\n' "configured: ${target_owner}/${repo} $patch"
+      result="$(ghorg_api PATCH "/repos/${target_owner}/${repo}" "${patch}")"
+      status="$(ghorg_status_of "${result}")"
+      [ "${status}" != '200' ] && \
+        printf '%s\n' "warn: PATCH '${target_owner}/${repo}': HTTP '${status}'" >&2
+      [ "${verbose}" = '1' ] && [ "${status}" = '200' ] && \
+        printf '%s\n' "configured: ${target_owner}/${repo} ${patch}"
     fi
   fi
 
-  if [ "$actions_state" != 'leave' ]; then
-    [ "$actions_state" = 'enable' ] && enabled='true' || enabled='false'
-    body="$(jq -n --argjson e "$enabled" -- '{enabled: $e, allowed_actions: "all"}')"
-    if [ "$dry_run" = '1' ]; then
-      printf '%s\n' "DRY-RUN: actions $actions_state on ${target_owner}/${repo}"
+  if [ "${actions_state}" != 'leave' ]; then
+    [ "${actions_state}" = 'enable' ] && enabled='true' || enabled='false'
+    body="$(jq -n --argjson e "${enabled}" -- '{enabled: $e, allowed_actions: "all"}')"
+    if [ "${dry_run}" = '1' ]; then
+      printf '%s\n' "DRY-RUN: actions ${actions_state} on ${target_owner}/${repo}"
     else
-      result="$(ghorg_api PUT "/repos/${target_owner}/${repo}/actions/permissions" "$body")"
-      status="$(ghorg_status_of "$result")"
-      case "$status" in
-        204|200) [ "$verbose" = '1' ] && \
-          printf '%s\n' "actions=$actions_state on ${target_owner}/${repo}" ;;
+      result="$(ghorg_api PUT "/repos/${target_owner}/${repo}/actions/permissions" "${body}")"
+      status="$(ghorg_status_of "${result}")"
+      case "${status}" in
+        204|200) [ "${verbose}" = '1' ] && \
+          printf '%s\n' "actions=${actions_state} on ${target_owner}/${repo}" ;;
         *) printf '%s\n' \
-          "warn: actions $actions_state on ${target_owner}/${repo}: HTTP $status" >&2 ;;
+          "warn: actions ${actions_state} on ${target_owner}/${repo}: HTTP ${status}" >&2 ;;
       esac
     fi
   fi
 
-  if [ "$workflow_perms" != 'leave' ]; then
-    body="$(jq -n --arg p "$workflow_perms" -- \
+  if [ "${workflow_perms}" != 'leave' ]; then
+    body="$(jq -n --arg p "${workflow_perms}" -- \
       '{default_workflow_permissions: $p, can_approve_pull_request_reviews: false}')"
-    if [ "$dry_run" = '1' ]; then
-      printf '%s\n' "DRY-RUN: workflow-perms $workflow_perms on ${target_owner}/${repo}"
+    if [ "${dry_run}" = '1' ]; then
+      printf '%s\n' "DRY-RUN: workflow-perms ${workflow_perms} on ${target_owner}/${repo}"
     else
       result="$(ghorg_api PUT \
-        "/repos/${target_owner}/${repo}/actions/permissions/workflow" "$body")"
-      status="$(ghorg_status_of "$result")"
-      case "$status" in
-        204|200) [ "$verbose" = '1' ] && \
-          printf '%s\n' "workflow-perms=$workflow_perms on ${target_owner}/${repo}" ;;
+        "/repos/${target_owner}/${repo}/actions/permissions/workflow" "${body}")"
+      status="$(ghorg_status_of "${result}")"
+      case "${status}" in
+        204|200) [ "${verbose}" = '1' ] && \
+          printf '%s\n' "workflow-perms=${workflow_perms} on ${target_owner}/${repo}" ;;
         *) printf '%s\n' \
-          "warn: workflow-perms $workflow_perms on ${target_owner}/${repo}: HTTP $status" >&2 ;;
+          "warn: workflow-perms ${workflow_perms} on ${target_owner}/${repo}: HTTP ${status}" >&2 ;;
       esac
     fi
   fi
@@ -236,65 +299,66 @@ configure_one() {
 
 main() {
   local target_type auth_user source_repos target_repos missing to_configure repo
-  printf '%s\n' "source: $source_owner -> target: $target_owner"
+
+  printf '%s\n' "source: ${source_owner} -> target: ${target_owner}"
 
   ## If the target is a User, GitHub will fork to the authenticated
   ## user regardless of target_owner. Verify equivalence up front and
   ## abort the whole run rather than discovering this per repo.
-  target_type="$(ghorg_account_type "$target_owner")"
-  if [ "$target_type" = 'User' ]; then
+  target_type="$(ghorg_account_type "${target_owner}")"
+  if [ "${target_type}" = 'User' ]; then
     auth_user="$(ghorg_authenticated_user)"
-    if [ "$auth_user" != "$target_owner" ]; then
+    if [ "${auth_user}" != "${target_owner}" ]; then
       printf '%s\n' \
-        "error: target user $target_owner does not match auth user $auth_user; aborting" >&2
+        "error: target user '${target_owner}' does not match auth user '${auth_user}'; aborting" >&2
       exit 1
     fi
   fi
 
-  source_repos="$(ghorg_list_repos "$source_owner" \
-    "$include_private" "$include_archived" "$include_forks" \
-    | ghorg_filter_names "$include_re" "$exclude_re" \
+  source_repos="$(ghorg_list_repos "${source_owner}" \
+    "${include_private}" "${include_archived}" "${include_forks}" \
+    | ghorg_filter_names "${include_re}" "${exclude_re}" \
     | sort --unique)"
   ## Target side: do NOT exclude forks - target forks ARE the mirrors.
-  target_repos="$(ghorg_list_repos "$target_owner" 1 1 1 \
+  target_repos="$(ghorg_list_repos "${target_owner}" 1 1 1 \
     | sort --unique)"
 
-  if [ -z "$source_repos" ]; then
+  if [ -z "${source_repos}" ]; then
     printf '%s\n' 'no source repos matched.' >&2
     return 0
   fi
 
   missing="$(comm -23 \
-    <(printf '%s\n' "$source_repos") \
-    <(printf '%s\n' "$target_repos"))"
+    <(printf '%s\n' "${source_repos}") \
+    <(printf '%s\n' "${target_repos}"))"
 
-  if [ -z "$missing" ]; then
+  if [ -z "${missing}" ]; then
     printf '%s\n' 'no new forks needed.'
   else
     while IFS= read -r repo; do
-      [ -z "$repo" ] && continue
-      fork_one "$repo"
-    done <<< "$missing"
+      [ -z "${repo}" ] && continue
+      fork_one "${repo}"
+    done <<< "${missing}"
   fi
 
   ## Re-list target after potential new forks (GitHub fork creation is
   ## async; brand-new forks may not appear yet, but configure_one is
   ## idempotent on the next run).
-  target_repos="$(ghorg_list_repos "$target_owner" 1 1 1 \
+  target_repos="$(ghorg_list_repos "${target_owner}" 1 1 1 \
     | sort --unique)"
 
   ## Configure only those target repos that exist for a same-named
   ## source repo - leaves unrelated target-side repos alone.
   to_configure="$(comm -12 \
-    <(printf '%s\n' "$source_repos") \
-    <(printf '%s\n' "$target_repos"))"
+    <(printf '%s\n' "${source_repos}") \
+    <(printf '%s\n' "${target_repos}"))"
 
-  if [ -n "$to_configure" ]; then
+  if [ -n "${to_configure}" ]; then
     while IFS= read -r repo; do
-      [ -z "$repo" ] && continue
-      check_collision "$repo"
-      configure_one "$repo"
-    done <<< "$to_configure"
+      [ -z "${repo}" ] && continue
+      check_collision "${repo}"
+      configure_one "${repo}"
+    done <<< "${to_configure}"
   fi
 }
 

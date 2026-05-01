@@ -24,10 +24,10 @@ if [ "${CI:-}" != "true" ]; then
 fi
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
-FIXTURE_DIR="$(cd -- "$SCRIPT_DIR/../fixtures" && pwd)"
+FIXTURE_DIR="$(cd -- "${SCRIPT_DIR}/../fixtures" && pwd)"
 
 export GHORG_MOCK=1
-export GHORG_MOCK_DIR="$FIXTURE_DIR"
+export GHORG_MOCK_DIR="${FIXTURE_DIR}"
 
 out="$(dm-github-policy --dry-run 2>&1)"
 
@@ -49,19 +49,19 @@ required=(
    '=== summary ==='
 )
 for needle in "${required[@]}"; do
-   if ! grep --quiet --fixed-strings -- "$needle" <<< "$out"; then
-      printf '%s\n' "FAIL: missing expected fragment: $needle" >&2
+   if ! grep --quiet --fixed-strings -- "${needle}" <<< "${out}"; then
+      printf '%s\n' "FAIL: missing expected fragment: ${needle}" >&2
       fail=1
    fi
 done
 
 ## --dry-run must not emit a real "ok:" or "warn:" prefix that comes
 ## from api_call's success/failure path - those mean a real PATCH ran.
-if grep --quiet --extended-regexp -- '^ok:|^warn:' <<< "$out"; then
+if grep --quiet --extended-regexp -- '^ok:|^warn:' <<< "${out}"; then
    printf '%s\n' \
       'FAIL: --dry-run unexpectedly printed ok:/warn: real-API output:' >&2
-   grep --extended-regexp -- '^ok:|^warn:' <<< "$out" | head -5 >&2
+   grep --extended-regexp -- '^ok:|^warn:' <<< "${out}" | head -5 >&2
    fail=1
 fi
 
-exit "$fail"
+exit "${fail}"

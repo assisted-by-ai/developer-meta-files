@@ -23,8 +23,13 @@ source /usr/libexec/developer-meta-files/github-org-lib.bsh
 ## dump on some systems (rspamd issue #5137); helper-scripts provides
 ## a one-liner test that prints a clear diagnostic and exits non-zero
 ## if wc is broken, so we never silently produce an empty count.
+##
+## ${HELPER_SCRIPTS_PATH:-} prefix lets a caller (e.g. derivative-maker
+## running with helper-scripts as a submodule) point at an in-tree
+## checkout instead of the system install. Empty default = system
+## install at /usr/libexec/helper-scripts/.
 # shellcheck source=/dev/null
-source /usr/libexec/helper-scripts/wc-test.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/wc-test.sh
 
 include_private=0
 include_archived=0
@@ -64,7 +69,7 @@ Options:
   -h, --help           show this help and exit
 
 Auth (optional for public reads):
-  $GITHUB_TOKEN env var, or chmod-600 ~/.config/github-token. Without
+  ${GITHUB_TOKEN} env var, or chmod-600 ~/.config/github-token. Without
   a token, requests go out unauthenticated and are subject to GitHub's
   60-req/hr-per-IP rate limit.
 EOF
@@ -72,21 +77,65 @@ EOF
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --include-private)  include_private=1; shift ;;
-    --include-archived) include_archived=1; shift ;;
-    --include-forks)    include_forks=1; shift ;;
-    --include) include_re="$2"; shift 2 ;;
-    --exclude) exclude_re="$2"; shift 2 ;;
-    --shallow) shallow=1; shift ;;
-    --ssh)     url_scheme='ssh'; shift ;;
-    --https)   url_scheme='https'; shift ;;
-    --jobs)    jobs="$2"; shift 2 ;;
-    --dry-run) dry_run=1; shift ;;
-    -v|--verbose) verbose=1; shift ;;
-    -h|--help) show_help; exit 0 ;;
-    --) shift; break ;;
-    -*) printf '%s\n' "unknown option: $1" >&2; exit 64 ;;
-    *)  break ;;
+    --include-private)
+      include_private=1
+      shift
+      ;;
+    --include-archived)
+      include_archived=1
+      shift
+      ;;
+    --include-forks)
+      include_forks=1
+      shift
+      ;;
+    --include)
+      include_re="$2"
+      shift 2
+      ;;
+    --exclude)
+      exclude_re="$2"
+      shift 2
+      ;;
+    --shallow)
+      shallow=1
+      shift
+      ;;
+    --ssh)
+      url_scheme='ssh'
+      shift
+      ;;
+    --https)
+      url_scheme='https'
+      shift
+      ;;
+    --jobs)
+      jobs="$2"
+      shift 2
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    -v|--verbose)
+      verbose=1
+      shift
+      ;;
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      printf '%s\n' "unknown option: '$1'" >&2
+      exit 64
+      ;;
+    *)
+      break
+      ;;
   esac
 done
 
@@ -102,8 +151,10 @@ ghorg_require_deps
 
 repo_url() {
   local repo
+
   repo="$1"
-  case "$url_scheme" in
+
+  case "${url_scheme}" in
     ssh)   printf '%s' "git@github.com:${source_org}/${repo}.git" ;;
     https) printf '%s' "https://github.com/${source_org}/${repo}.git" ;;
   esac
@@ -118,55 +169,58 @@ clone_or_update_one() {
   local repo repo_dir url existing_url current_branch
   local safe_existing_url safe_branch
   local -a clone_args
+
   repo="$1"
-  ghorg_validate_name "$repo" repo || return 0
+
+  ghorg_validate_name "${repo}" repo || return 0
+
   repo_dir="${dest_dir}/${repo}"
-  url="$(repo_url "$repo")"
+  url="$(repo_url "${repo}")"
 
   if [ -d "${repo_dir}/.git" ]; then
     ## Origin-URL collision check: if an existing clone's origin
     ## points elsewhere (because the operator reused dest_dir across
     ## source orgs and a name collided), skip rather than silently
     ## fetch from the wrong upstream.
-    existing_url="$(git -C "$repo_dir" remote get-url origin 2>/dev/null || true)"
-    if [ -n "$existing_url" ] && [ "$existing_url" != "$url" ]; then
-      safe_existing_url="$(ghorg_safe_print "$GHORG_MAX_DISPLAY_LEN" "$existing_url")"
+    existing_url="$(git -C "${repo_dir}" remote get-url origin 2>/dev/null || true)"
+    if [ -n "${existing_url}" ] && [ "${existing_url}" != "${url}" ]; then
+      safe_existing_url="$(ghorg_safe_print "${GHORG_MAX_DISPLAY_LEN}" "${existing_url}")"
       printf '%s\n' \
-        "warn: $repo_dir: origin is $safe_existing_url, expected $url; skipping (name collision?)" >&2
+        "warn: '${repo_dir}': origin is '${safe_existing_url}', expected '${url}'; skipping (name collision?)" >&2
       return 0
     fi
 
-    if [ "$dry_run" = '1' ]; then
-      printf '%s\n' "DRY-RUN: update $repo_dir"
+    if [ "${dry_run}" = '1' ]; then
+      printf '%s\n' "DRY-RUN: update ${repo_dir}"
       return 0
     fi
-    [ "$verbose" = '1' ] && printf '%s\n' "update: $repo_dir"
+    [ "${verbose}" = '1' ] && printf '%s\n' "update: ${repo_dir}"
     ## --ff-only refuses anything that isn't a clean fast-forward; safer
     ## than `pull` for unattended runs where divergence would otherwise
     ## attempt a merge. `--` separates options from positional args
     ## even though no operand is an option here - belt and braces.
-    git -C "$repo_dir" fetch --prune --tags -- origin
-    current_branch="$(git -C "$repo_dir" symbolic-ref --short HEAD 2>/dev/null || true)"
-    if [ -n "$current_branch" ]; then
+    git -C "${repo_dir}" fetch --prune --tags -- origin
+    current_branch="$(git -C "${repo_dir}" symbolic-ref --short HEAD 2>/dev/null || true)"
+    if [ -n "${current_branch}" ]; then
       ## @{u} is an unambiguous symbolic ref for the upstream of the
       ## current branch - immune to tag/branch name collisions.
-      if ! git -C "$repo_dir" merge --ff-only "@{u}" 2>/dev/null; then
-        safe_branch="$(ghorg_safe_print "$GHORG_MAX_REPO_NAME_LEN" "$current_branch")"
+      if ! git -C "${repo_dir}" merge --ff-only "@{u}" 2>/dev/null; then
+        safe_branch="$(ghorg_safe_print "${GHORG_MAX_REPO_NAME_LEN}" "${current_branch}")"
         printf '%s\n' \
-          "warn: $repo_dir: $safe_branch not fast-forwardable, skipping merge" >&2
+          "warn: '${repo_dir}': '${safe_branch}' not fast-forwardable, skipping merge" >&2
       fi
     fi
-  elif [ -e "$repo_dir" ]; then
-    printf '%s\n' "warn: $repo_dir exists and is not a git checkout, skipping" >&2
+  elif [ -e "${repo_dir}" ]; then
+    printf '%s\n' "warn: '${repo_dir}' exists and is not a git checkout, skipping" >&2
     return 0
   else
-    if [ "$dry_run" = '1' ]; then
-      printf '%s\n' "DRY-RUN: clone $url -> $repo_dir"
+    if [ "${dry_run}" = '1' ]; then
+      printf '%s\n' "DRY-RUN: clone ${url} -> ${repo_dir}"
       return 0
     fi
-    [ "$verbose" = '1' ] && printf '%s\n' "clone: $url"
+    [ "${verbose}" = '1' ] && printf '%s\n' "clone: ${url}"
     clone_args=( clone )
-    [ "$shallow" = '1' ] && clone_args+=( --depth=1 )
+    [ "${shallow}" = '1' ] && clone_args+=( --depth=1 )
     ## Defense-in-depth against hostile origins:
     ##   - protocol.file.allow=never blocks a malicious upstream from
     ##     redirecting clone-time fetches through file:// URLs (used
@@ -180,7 +234,7 @@ clone_or_update_one() {
     ## `--` ensures a hostile-looking URL or repo_dir starting with
     ## `-` (which validation already rejects upstream) cannot be
     ## interpreted as a git option.
-    clone_args+=( -- "$url" "$repo_dir" )
+    clone_args+=( -- "${url}" "${repo_dir}" )
     ## GIT_LFS_SKIP_SMUDGE=1 prevents the LFS smudge filter from
     ## auto-fetching arbitrary objects on clone if the upstream's
     ## .gitattributes points binary files at LFS. Operators who
@@ -192,32 +246,33 @@ clone_or_update_one() {
 
 main() {
   local repos repo_count active repo
-  mkdir -p -- "$dest_dir"
 
-  repos="$(ghorg_list_repos "$source_org" \
-    "$include_private" "$include_archived" "$include_forks" \
-    | ghorg_filter_names "$include_re" "$exclude_re" \
+  mkdir -p -- "${dest_dir}"
+
+  repos="$(ghorg_list_repos "${source_org}" \
+    "${include_private}" "${include_archived}" "${include_forks}" \
+    | ghorg_filter_names "${include_re}" "${exclude_re}" \
     | sort --unique)"
 
-  if [ -z "$repos" ]; then
+  if [ -z "${repos}" ]; then
     printf '%s\n' 'no repos matched.' >&2
     return 0
   fi
 
-  repo_count="$(printf '%s\n' "$repos" | wc --lines)"
-  printf '%s\n' "$repo_count repos to process under $dest_dir"
+  repo_count="$(printf '%s\n' "${repos}" | wc --lines)"
+  printf '%s\n' "${repo_count} repos to process under ${dest_dir}"
 
-  ## Bounded parallelism: keep at most $jobs background jobs alive.
+  ## Bounded parallelism: keep at most ${jobs} background jobs alive.
   active=0
   while IFS= read -r repo; do
-    [ -z "$repo" ] && continue
-    clone_or_update_one "$repo" &
+    [ -z "${repo}" ] && continue
+    clone_or_update_one "${repo}" &
     active=$(( active + 1 ))
-    if [ "$active" -ge "$jobs" ]; then
+    if [ "${active}" -ge "${jobs}" ]; then
       wait -n || true
       active=$(( active - 1 ))
     fi
-  done <<< "$repos"
+  done <<< "${repos}"
   wait
 }
 

@@ -50,20 +50,40 @@ Options:
   -h, --help
 
 Auth:
-  $GITHUB_TOKEN env var, or chmod-600 ~/.config/github-token. Token
+  ${GITHUB_TOKEN} env var, or chmod-600 ~/.config/github-token. Token
   needs the admin:org scope.
 EOF
 }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --get)        mode='get'; shift ;;
-    --dry-run)    dry_run=1; shift ;;
-    -v|--verbose) verbose=1; shift ;;
-    -h|--help)    show_help; exit 0 ;;
-    --) shift; break ;;
-    -*) printf '%s\n' "unknown option: $1" >&2; exit 64 ;;
-    *)  break ;;
+    --get)
+      mode='get'
+      shift
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    -v|--verbose)
+      verbose=1
+      shift
+      ;;
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      printf '%s\n' "unknown option: '$1'" >&2
+      exit 64
+      ;;
+    *)
+      break
+      ;;
   esac
 done
 
@@ -75,11 +95,11 @@ fi
 org="$1"
 policy="${2:-all_external_contributors}"
 
-case "$policy" in
+case "${policy}" in
   all_external_contributors|first_time_contributors|first_time_contributors_new_to_github) ;;
   *)
-    safe_policy="$(ghorg_safe_print 64 "$policy")"
-    printf '%s\n' "invalid policy: $safe_policy" >&2
+    safe_policy="$(ghorg_safe_print 64 "${policy}")"
+    printf '%s\n' "invalid policy: '${safe_policy}'" >&2
     printf '%s\n' \
       'valid: all_external_contributors, first_time_contributors, first_time_contributors_new_to_github' >&2
     exit 64
@@ -91,12 +111,12 @@ ghorg_require_deps
 ## Validate the org name and confirm it really is an Organization,
 ## not a User. The fork-PR approval policy endpoint exists only on
 ## orgs; calling it on a user account would 404.
-ghorg_validate_name "$org" user || exit 1
-account_type="$(ghorg_account_type "$org")"
-if [ "$account_type" != 'Organization' ]; then
-  safe_org="$(ghorg_safe_print 64 "$org")"
+ghorg_validate_name "${org}" user || exit 1
+account_type="$(ghorg_account_type "${org}")"
+if [ "${account_type}" != 'Organization' ]; then
+  safe_org="$(ghorg_safe_print 64 "${org}")"
   printf '%s\n' \
-    "error: $safe_org is a $account_type, not an Organization; this setting is org-only" >&2
+    "error: '${safe_org}' is a '${account_type}', not an Organization; this setting is org-only" >&2
   exit 1
 fi
 
@@ -104,50 +124,52 @@ api_path="/orgs/${org}/actions/permissions/fork-pr-contributor-approval"
 
 current_policy() {
   local result status body safe_body
-  result="$(ghorg_api GET "$api_path")" || return 1
-  status="$(ghorg_status_of "$result")"
-  body="$(ghorg_body_of "$result")"
-  if [ "$status" != '200' ]; then
-    safe_body="$(ghorg_safe_print 512 "$body")"
-    printf '%s\n' "error: GET $api_path: HTTP $status" "$safe_body" >&2
+
+  result="$(ghorg_api GET "${api_path}")" || return 1
+  status="$(ghorg_status_of "${result}")"
+  body="$(ghorg_body_of "${result}")"
+
+  if [ "${status}" != '200' ]; then
+    safe_body="$(ghorg_safe_print 512 "${body}")"
+    printf '%s\n' "error: GET '${api_path}': HTTP '${status}'" "${safe_body}" >&2
     return 1
   fi
-  printf '%s' "$body" | jq -r -- '.approval_policy // "(unset)"'
+  printf '%s' "${body}" | jq -r -- '.approval_policy // "(unset)"'
 }
 
-case "$mode" in
+case "${mode}" in
   get)
     cur="$(current_policy)"
-    printf '%s\n' "org: $org"
-    printf '%s\n' "current approval_policy: $cur"
+    printf '%s\n' "org: ${org}"
+    printf '%s\n' "current approval_policy: ${cur}"
     ;;
   set)
     cur="$(current_policy)"
-    printf '%s\n' "org: $org"
-    printf '%s\n' "current approval_policy: $cur"
-    printf '%s\n' "desired approval_policy: $policy"
-    if [ "$cur" = "$policy" ]; then
+    printf '%s\n' "org: ${org}"
+    printf '%s\n' "current approval_policy: ${cur}"
+    printf '%s\n' "desired approval_policy: ${policy}"
+    if [ "${cur}" = "${policy}" ]; then
       printf '%s\n' 'no change needed.'
       exit 0
     fi
-    if [ "$dry_run" = '1' ]; then
-      printf '%s\n' "DRY-RUN: would PUT $api_path approval_policy=$policy"
+    if [ "${dry_run}" = '1' ]; then
+      printf '%s\n' "DRY-RUN: would PUT ${api_path} approval_policy=${policy}"
       exit 0
     fi
-    body="$(jq -n --arg p "$policy" -- '{approval_policy: $p}')"
-    result="$(ghorg_api PUT "$api_path" "$body")"
-    status="$(ghorg_status_of "$result")"
-    case "$status" in
+    body="$(jq -n --arg p "${policy}" -- '{approval_policy: $p}')"
+    result="$(ghorg_api PUT "${api_path}" "${body}")"
+    status="$(ghorg_status_of "${result}")"
+    case "${status}" in
       204|200)
-         printf '%s\n' "updated approval_policy=$policy on $org"
-         if [ "$verbose" = '1' ]; then
-            response_body="$(ghorg_safe_print 512 "$(ghorg_body_of "$result")")"
-            printf '%s\n' "response body: $response_body"
+         printf '%s\n' "updated approval_policy=${policy} on ${org}"
+         if [ "${verbose}" = '1' ]; then
+            response_body="$(ghorg_safe_print 512 "$(ghorg_body_of "${result}")")"
+            printf '%s\n' "response body: ${response_body}"
          fi
          ;;
       *)
-         response_body="$(ghorg_safe_print 512 "$(ghorg_body_of "$result")")"
-         printf '%s\n' "error: PUT $api_path: HTTP $status" "$response_body" >&2
+         response_body="$(ghorg_safe_print 512 "$(ghorg_body_of "${result}")")"
+         printf '%s\n' "error: PUT '${api_path}': HTTP '${status}'" "${response_body}" >&2
          exit 1
          ;;
     esac

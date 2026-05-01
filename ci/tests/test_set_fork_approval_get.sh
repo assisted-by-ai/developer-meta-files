@@ -22,21 +22,21 @@ if [ "${CI:-}" != "true" ]; then
 fi
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
-FIXTURE_DIR="$(cd -- "$SCRIPT_DIR/../fixtures" && pwd)"
+FIXTURE_DIR="$(cd -- "${SCRIPT_DIR}/../fixtures" && pwd)"
 
 export GHORG_MOCK=1
-export GHORG_MOCK_DIR="$FIXTURE_DIR"
+export GHORG_MOCK_DIR="${FIXTURE_DIR}"
 
 out="$(github-org-set-fork-approval --get org-ai-assisted)"
 
 ## Fixture sets approval_policy=first_time_contributors.
-if ! grep --quiet -- 'current approval_policy: first_time_contributors' <<< "$out"; then
+if ! grep --quiet -- 'current approval_policy: first_time_contributors' <<< "${out}"; then
   printf '%s\n' \
     'FAIL: expected "current approval_policy: first_time_contributors"' \
-    "$out" >&2
+    "${out}" >&2
   exit 1
 fi
-if ! grep --quiet -- '^org: org-ai-assisted$' <<< "$out"; then
+if ! grep --quiet -- '^org: org-ai-assisted$' <<< "${out}"; then
   printf '%s\n' 'FAIL: expected "org: org-ai-assisted" header' >&2
   exit 1
 fi

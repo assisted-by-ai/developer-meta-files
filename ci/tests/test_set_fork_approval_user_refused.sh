@@ -22,24 +22,24 @@ if [ "${CI:-}" != "true" ]; then
 fi
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
-FIXTURE_DIR="$(cd -- "$SCRIPT_DIR/../fixtures" && pwd)"
+FIXTURE_DIR="$(cd -- "${SCRIPT_DIR}/../fixtures" && pwd)"
 
 export GHORG_MOCK=1
-export GHORG_MOCK_DIR="$FIXTURE_DIR"
+export GHORG_MOCK_DIR="${FIXTURE_DIR}"
 
 set +e
 out="$(github-org-set-fork-approval --get assisted-by-ai 2>&1)"
 rc=$?
 set -e
 
-if [ "$rc" -eq 0 ]; then
-  printf '%s\n' "FAIL: expected non-zero exit, got 0. Output:" "$out" >&2
+if [ "${rc}" -eq 0 ]; then
+  printf '%s\n' "FAIL: expected non-zero exit, got 0. Output:" "${out}" >&2
   exit 1
 fi
-if ! grep --quiet --ignore-case -- 'is a User, not an Organization' <<< "$out"; then
+if ! grep --quiet --ignore-case -- "is a 'User', not an Organization" <<< "${out}"; then
   printf '%s\n' \
     'FAIL: expected "User, not an Organization" refusal. Output:' \
-    "$out" >&2
+    "${out}" >&2
   exit 1
 fi
 

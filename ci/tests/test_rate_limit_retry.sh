@@ -28,13 +28,15 @@ source /usr/libexec/developer-meta-files/github-org-lib.bsh
 fail=0
 expect() {
   local desc want got want_q got_q
+
   desc="$1"
   want="$2"
   got="$3"
-  if [ "$got" != "$want" ]; then
-    want_q="$(printf '%q' "$want")"
-    got_q="$(printf '%q' "$got")"
-    printf '%s\n' "FAIL: $desc: want $want_q got $got_q" >&2
+
+  if [ "${got}" != "${want}" ]; then
+    want_q="$(printf '%q' "${want}")"
+    got_q="$(printf '%q' "${got}")"
+    printf '%s\n' "FAIL: ${desc}: want ${want_q} got ${got_q}" >&2
     fail=1
   fi
 }
@@ -52,16 +54,16 @@ hdr="$(mktemp)"
 ## (not an inline command string) so the trap is auditable.
 test_rate_limit_retry_cleanup_hdr() {
    # shellcheck disable=SC2317  ## invoked indirectly via trap
-   safe-rm --force -- "$hdr"
+   safe-rm --force -- "${hdr}"
 }
 trap test_rate_limit_retry_cleanup_hdr EXIT
 printf '%s\r\n' \
   'HTTP/2 429' \
   'Retry-After: 17' \
   'X-RateLimit-Reset: 99999999999' \
-  '' > "$hdr"
-parsed_retry_after="$(ghorg_parse_rate_limit_wait "$hdr")"
-expect 'parse Retry-After' '17' "$parsed_retry_after"
+  '' > "${hdr}"
+parsed_retry_after="$(ghorg_parse_rate_limit_wait "${hdr}")"
+expect 'parse Retry-After' '17' "${parsed_retry_after}"
 
 ## X-RateLimit-Reset used as fallback. Check just that we get a
 ## non-empty positive integer for a reset 10 seconds in the future.
@@ -70,12 +72,12 @@ future=$(( now_seconds + 10 ))
 printf '%s\r\n' \
   'HTTP/2 403' \
   'X-RateLimit-Remaining: 0' \
-  "X-RateLimit-Reset: $future" \
-  '' > "$hdr"
-got="$(ghorg_parse_rate_limit_wait "$hdr")"
-if [ -z "$got" ] || ! [[ "$got" =~ ^[0-9]+$ ]]; then
-  got_q="$(printf '%q' "$got")"
-  printf '%s\n' "FAIL: parse X-RateLimit-Reset: got $got_q" >&2
+  "X-RateLimit-Reset: ${future}" \
+  '' > "${hdr}"
+got="$(ghorg_parse_rate_limit_wait "${hdr}")"
+if [ -z "${got}" ] || ! [[ "${got}" =~ ^[0-9]+$ ]]; then
+  got_q="$(printf '%q' "${got}")"
+  printf '%s\n' "FAIL: parse X-RateLimit-Reset: got ${got_q}" >&2
   fail=1
 fi
 
@@ -84,17 +86,17 @@ now_seconds="$(date -u +%s)"
 past=$(( now_seconds - 100 ))
 printf '%s\r\n' \
   'HTTP/2 403' \
-  "X-RateLimit-Reset: $past" \
-  '' > "$hdr"
-parsed_stale="$(ghorg_parse_rate_limit_wait "$hdr")"
-expect 'parse stale reset' '' "$parsed_stale"
+  "X-RateLimit-Reset: ${past}" \
+  '' > "${hdr}"
+parsed_stale="$(ghorg_parse_rate_limit_wait "${hdr}")"
+expect 'parse stale reset' '' "${parsed_stale}"
 
 ## No relevant header -> empty.
 printf '%s\r\n' \
   'HTTP/2 200' \
   'Server: github.com' \
-  '' > "$hdr"
-parsed_no_hdr="$(ghorg_parse_rate_limit_wait "$hdr")"
-expect 'parse no rate-limit hdr' '' "$parsed_no_hdr"
+  '' > "${hdr}"
+parsed_no_hdr="$(ghorg_parse_rate_limit_wait "${hdr}")"
+expect 'parse no rate-limit hdr' '' "${parsed_no_hdr}"
 
-exit "$fail"
+exit "${fail}"
