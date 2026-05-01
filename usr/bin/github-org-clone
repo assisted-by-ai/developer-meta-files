@@ -130,7 +130,7 @@ while [ "$#" -gt 0 ]; do
       break
       ;;
     -*)
-      printf '%s\n' "unknown option: $1" >&2
+      printf '%s\n' "unknown option: '$1'" >&2
       exit 64
       ;;
     *)
@@ -186,7 +186,7 @@ clone_or_update_one() {
     if [ -n "${existing_url}" ] && [ "${existing_url}" != "${url}" ]; then
       safe_existing_url="$(ghorg_safe_print "${GHORG_MAX_DISPLAY_LEN}" "${existing_url}")"
       printf '%s\n' \
-        "warn: ${repo_dir}: origin is ${safe_existing_url}, expected ${url}; skipping (name collision?)" >&2
+        "warn: '${repo_dir}': origin is '${safe_existing_url}', expected '${url}'; skipping (name collision?)" >&2
       return 0
     fi
 
@@ -207,11 +207,11 @@ clone_or_update_one() {
       if ! git -C "${repo_dir}" merge --ff-only "@{u}" 2>/dev/null; then
         safe_branch="$(ghorg_safe_print "${GHORG_MAX_REPO_NAME_LEN}" "${current_branch}")"
         printf '%s\n' \
-          "warn: ${repo_dir}: ${safe_branch} not fast-forwardable, skipping merge" >&2
+          "warn: '${repo_dir}': '${safe_branch}' not fast-forwardable, skipping merge" >&2
       fi
     fi
   elif [ -e "${repo_dir}" ]; then
-    printf '%s\n' "warn: ${repo_dir} exists and is not a git checkout, skipping" >&2
+    printf '%s\n' "warn: '${repo_dir}' exists and is not a git checkout, skipping" >&2
     return 0
   else
     if [ "${dry_run}" = '1' ]; then

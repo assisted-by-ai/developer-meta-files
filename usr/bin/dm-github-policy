@@ -172,7 +172,7 @@ while [ "$#" -gt 0 ]; do
          ;;
       *)
          arg_safe="$(ghorg_safe_print 64 "$1")"
-         printf '%s\n' "unknown argument: ${arg_safe}" >&2
+         printf '%s\n' "unknown argument: '${arg_safe}'" >&2
          exit 64
          ;;
    esac
@@ -236,7 +236,7 @@ api_call() {
       *)
          response_body="$(ghorg_body_of "${result}")"
          safe_body="$(ghorg_safe_print 512 "${response_body}")"
-         printf '%s\n' "warn: ${label} [${status}]" "${safe_body}" >&2
+         printf '%s\n' "warn: '${label}' ['${status}']" "${safe_body}" >&2
          api_record warn
          return 1
          ;;
@@ -265,7 +265,7 @@ upsert_org_ruleset() {
    result="$(ghorg_api GET "/orgs/${org}/rulesets")" || return 1
    status="$(ghorg_status_of "${result}")"
    if [ "${status}" != '200' ]; then
-      printf '%s\n' "warn: ${org}: list rulesets returned ${status}" >&2
+      printf '%s\n' "warn: '${org}': list rulesets returned '${status}'" >&2
       return 1
    fi
    existing_id="$(ghorg_body_of "${result}" \
@@ -281,7 +281,7 @@ upsert_org_ruleset() {
       if ! [[ "${existing_id}" =~ ^[0-9]+$ ]] || \
          [ "${#existing_id}" -gt "${GHORG_MAX_ID_LEN}" ]; then
          safe_id="$(ghorg_safe_print 32 "${existing_id}")"
-         printf '%s\n' "warn: ${org}: ruleset id ${safe_id} not a valid numeric id; refusing" >&2
+         printf '%s\n' "warn: '${org}': ruleset id '${safe_id}' not a valid numeric id; refusing" >&2
          return 1
       fi
       api_call "${org}: update ruleset id=${existing_id} (${name})" \
@@ -358,7 +358,7 @@ ${list_safe_body}" >&2
          [ "${#existing_id}" -gt "${GHORG_MAX_ID_LEN}" ]; then
          safe_id="$(ghorg_safe_print 32 "${existing_id}")"
          printf '%s\n' \
-            "warn: ${org}: code-security config id ${safe_id} not a valid numeric id; refusing" >&2
+            "warn: '${org}': code-security config id '${safe_id}' not a valid numeric id; refusing" >&2
          api_record warn
          return 1
       fi
@@ -952,7 +952,7 @@ main() {
       ## API.
       repos="$(ghorg_list_repos "${org}" 0 0 0 | sort --unique)"
       if [ -z "${repos}" ]; then
-         printf '%s\n' "no repos matched in ${org}" >&2
+         printf '%s\n' "no repos matched in '${org}'" >&2
          continue
       fi
 

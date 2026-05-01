@@ -110,7 +110,7 @@ while [ "$#" -gt 0 ]; do
           actions_state="$2"
           ;;
         *)
-          printf '%s\n' "invalid --actions value: $2" >&2
+          printf '%s\n' "invalid --actions value: '$2'" >&2
           exit 64
           ;;
       esac
@@ -122,7 +122,7 @@ while [ "$#" -gt 0 ]; do
           workflow_perms="$2"
           ;;
         *)
-          printf '%s\n' "invalid --workflow-perms value: $2" >&2
+          printf '%s\n' "invalid --workflow-perms value: '$2'" >&2
           exit 64
           ;;
       esac
@@ -145,7 +145,7 @@ while [ "$#" -gt 0 ]; do
       break
       ;;
     -*)
-      printf '%s\n' "unknown option: $1" >&2
+      printf '%s\n' "unknown option: '$1'" >&2
       exit 64
       ;;
     *)
@@ -190,7 +190,7 @@ fork_one() {
       safe_target="$(ghorg_safe_print "${GHORG_MAX_USER_LOGIN_LEN}" "${target_owner}")"
       safe_auth="$(ghorg_safe_print "${GHORG_MAX_USER_LOGIN_LEN}" "${auth_user}")"
       printf '%s\n' \
-        "error: target user ${safe_target} does not match auth user ${safe_auth}; refusing to fork" >&2
+        "error: target user '${safe_target}' does not match auth user '${safe_auth}'; refusing to fork" >&2
       return 1
     fi
     body="$(jq -n -- '{default_branch_only: false}')"
@@ -206,7 +206,7 @@ fork_one() {
       printf '%s\n' "forked: ${source_owner}/${repo} -> ${target_owner}/${repo}"
       ;;
     *)
-      printf '%s\n' "error: fork ${source_owner}/${repo}: HTTP ${status}" >&2
+      printf '%s\n' "error: fork '${source_owner}/${repo}': HTTP '${status}'" >&2
       return 1
       ;;
   esac
@@ -231,7 +231,7 @@ check_collision() {
     safe_parent="$(ghorg_safe_print "${GHORG_MAX_DISPLAY_LEN}" "${parent}")"
     safe_expected="$(ghorg_safe_print "${GHORG_MAX_DISPLAY_LEN}" "${expected}")"
     printf '%s\n' \
-      "warn: collision: ${target_owner}/${safe_repo} exists as fork of ${safe_parent}, expected ${safe_expected}" >&2
+      "warn: collision: '${target_owner}/${safe_repo}' exists as fork of '${safe_parent}', expected '${safe_expected}'" >&2
   fi
 }
 
@@ -255,7 +255,7 @@ configure_one() {
       result="$(ghorg_api PATCH "/repos/${target_owner}/${repo}" "${patch}")"
       status="$(ghorg_status_of "${result}")"
       [ "${status}" != '200' ] && \
-        printf '%s\n' "warn: PATCH ${target_owner}/${repo}: HTTP ${status}" >&2
+        printf '%s\n' "warn: PATCH '${target_owner}/${repo}': HTTP '${status}'" >&2
       [ "${verbose}" = '1' ] && [ "${status}" = '200' ] && \
         printf '%s\n' "configured: ${target_owner}/${repo} ${patch}"
     fi
@@ -310,7 +310,7 @@ main() {
     auth_user="$(ghorg_authenticated_user)"
     if [ "${auth_user}" != "${target_owner}" ]; then
       printf '%s\n' \
-        "error: target user ${target_owner} does not match auth user ${auth_user}; aborting" >&2
+        "error: target user '${target_owner}' does not match auth user '${auth_user}'; aborting" >&2
       exit 1
     fi
   fi

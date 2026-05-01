@@ -36,7 +36,7 @@ if [ "${rc}" -eq 0 ]; then
   printf '%s\n' "FAIL: expected non-zero exit, got 0. Output:" "${out}" >&2
   exit 1
 fi
-if ! grep --quiet --ignore-case -- 'is a User, not an Organization' <<< "${out}"; then
+if ! grep --quiet --ignore-case -- "is a 'User', not an Organization" <<< "${out}"; then
   printf '%s\n' \
     'FAIL: expected "User, not an Organization" refusal. Output:' \
     "${out}" >&2

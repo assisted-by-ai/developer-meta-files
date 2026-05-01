@@ -127,7 +127,7 @@ while [ "$#" -gt 0 ]; do
       break
       ;;
     -*)
-      printf '%s\n' "unknown option: $1" >&2
+      printf '%s\n' "unknown option: '$1'" >&2
       exit 64
       ;;
     *)
@@ -169,7 +169,7 @@ push_one() {
   ## a hostile filesystem can't smuggle bad names either.
   if ! ghorg_validate_name "${repo}" repo; then
     safe_repo_dir="$(ghorg_safe_print "${GHORG_MAX_DISPLAY_LEN}" "${repo_dir}")"
-    printf '%s\n' "warn: skipping ${safe_repo_dir} (invalid name)" >&2
+    printf '%s\n' "warn: skipping '${safe_repo_dir}' (invalid name)" >&2
     return 0
   fi
 
@@ -187,16 +187,16 @@ push_one() {
         ## avoid surprise repo creation. github-org-fork is the supported
         ## path for adding repos to the target.
         printf '%s\n' \
-          "warn: ${target_owner}/${repo} missing - run github-org-fork to create it; skipping" >&2
+          "warn: '${target_owner}/${repo}' missing - run github-org-fork to create it; skipping" >&2
       else
         printf '%s\n' \
-          "warn: ${target_owner}/${repo} does not exist on target, skipping" >&2
+          "warn: '${target_owner}/${repo}' does not exist on target, skipping" >&2
       fi
       return 0
       ;;
     *)
       printf '%s\n' \
-        "error: ${target_owner}/${repo} lookup failed (auth or transient); not pushing" >&2
+        "error: '${target_owner}/${repo}' lookup failed (auth or transient); not pushing" >&2
       return 1
       ;;
   esac
@@ -225,7 +225,7 @@ push_one() {
       ## refs/heads/<branch> for an attached HEAD; for a detached HEAD
       ## it returns non-zero, which we treat as "skip with warning".
       if ! resolved_head="$(git -C "${repo_dir}" symbolic-ref HEAD 2>/dev/null)"; then
-        printf '%s\n' "warn: ${repo_dir}: HEAD detached, skipping HEAD push" >&2
+        printf '%s\n' "warn: '${repo_dir}': HEAD detached, skipping HEAD push" >&2
         continue
       fi
       [ "${verbose}" = '1' ] && printf '%s\n' \
@@ -233,28 +233,28 @@ push_one() {
       git -C "${repo_dir}" push -- "${remote_name}" \
         "${resolved_head}:${resolved_head}" || \
         printf '%s\n' \
-          "warn: ${repo_dir}: ${resolved_head} push to ${remote_name} failed" >&2
+          "warn: '${repo_dir}': '${resolved_head}' push to '${remote_name}' failed" >&2
     else
       ## Validate the user-supplied branch name as a repo-name (same
       ## allowlist) before constructing a fully-qualified ref. This
       ## both blocks ref injection like `master HEAD` and prevents
       ## tag/branch ambiguity (we always use refs/heads/...).
       if ! ghorg_validate_name "${branch}" repo; then
-        printf '%s\n' "warn: ${repo_dir}: skipping invalid branch name" >&2
+        printf '%s\n' "warn: '${repo_dir}': skipping invalid branch name" >&2
         continue
       fi
       [ "${verbose}" = '1' ] && printf '%s\n' "push ${branch} ${repo_dir} -> ${remote_name}"
       git -C "${repo_dir}" push -- "${remote_name}" \
         "refs/heads/${branch}:refs/heads/${branch}" || \
         printf '%s\n' \
-          "warn: ${repo_dir}: branch ${branch} push to ${remote_name} failed" >&2
+          "warn: '${repo_dir}': branch '${branch}' push to '${remote_name}' failed" >&2
     fi
   done
 
   if [ "${push_tags}" = '1' ]; then
     [ "${verbose}" = '1' ] && printf '%s\n' "push --tags ${repo_dir} -> ${remote_name}"
     git -C "${repo_dir}" push --tags -- "${remote_name}" || \
-      printf '%s\n' "warn: ${repo_dir}: tag push to ${remote_name} failed" >&2
+      printf '%s\n' "warn: '${repo_dir}': tag push to '${remote_name}' failed" >&2
   fi
 }
 
@@ -263,7 +263,7 @@ main() {
   local -a candidate_dirs
 
   if [ ! -d "${source_dir}" ]; then
-    printf '%s\n' "error: source dir does not exist: ${source_dir}" >&2
+    printf '%s\n' "error: source dir does not exist: '${source_dir}'" >&2
     exit 1
   fi
 
@@ -299,11 +299,11 @@ main() {
 
   candidate_count="${#candidate_dirs[@]}"
   if [ "${candidate_count}" -eq 0 ]; then
-    printf '%s\n' "no git checkouts found under ${source_dir}" >&2
+    printf '%s\n' "no git checkouts found under '${source_dir}'" >&2
     return 0
   fi
 
-  printf '%s\n' "${candidate_count} repos to process"
+  printf '%s\n' "'${candidate_count}' repos to process"
 
   active=0
   for repo_dir in "${candidate_dirs[@]}"; do

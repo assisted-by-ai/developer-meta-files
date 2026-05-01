@@ -78,7 +78,7 @@ while [ "$#" -gt 0 ]; do
       break
       ;;
     -*)
-      printf '%s\n' "unknown option: $1" >&2
+      printf '%s\n' "unknown option: '$1'" >&2
       exit 64
       ;;
     *)
@@ -99,7 +99,7 @@ case "${policy}" in
   all_external_contributors|first_time_contributors|first_time_contributors_new_to_github) ;;
   *)
     safe_policy="$(ghorg_safe_print 64 "${policy}")"
-    printf '%s\n' "invalid policy: ${safe_policy}" >&2
+    printf '%s\n' "invalid policy: '${safe_policy}'" >&2
     printf '%s\n' \
       'valid: all_external_contributors, first_time_contributors, first_time_contributors_new_to_github' >&2
     exit 64
@@ -116,7 +116,7 @@ account_type="$(ghorg_account_type "${org}")"
 if [ "${account_type}" != 'Organization' ]; then
   safe_org="$(ghorg_safe_print 64 "${org}")"
   printf '%s\n' \
-    "error: ${safe_org} is a ${account_type}, not an Organization; this setting is org-only" >&2
+    "error: '${safe_org}' is a '${account_type}', not an Organization; this setting is org-only" >&2
   exit 1
 fi
 
@@ -131,7 +131,7 @@ current_policy() {
 
   if [ "${status}" != '200' ]; then
     safe_body="$(ghorg_safe_print 512 "${body}")"
-    printf '%s\n' "error: GET ${api_path}: HTTP ${status}" "${safe_body}" >&2
+    printf '%s\n' "error: GET '${api_path}': HTTP '${status}'" "${safe_body}" >&2
     return 1
   fi
   printf '%s' "${body}" | jq -r -- '.approval_policy // "(unset)"'
@@ -169,7 +169,7 @@ case "${mode}" in
          ;;
       *)
          response_body="$(ghorg_safe_print 512 "$(ghorg_body_of "${result}")")"
-         printf '%s\n' "error: PUT ${api_path}: HTTP ${status}" "${response_body}" >&2
+         printf '%s\n' "error: PUT '${api_path}': HTTP '${status}'" "${response_body}" >&2
          exit 1
          ;;
     esac
