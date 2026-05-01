@@ -161,10 +161,7 @@ repo_url() {
 }
 
 ## Clone a missing repo or fast-forward an existing one. Each call is
-## standalone so it can be safely backgrounded for parallelism. Repo
-## name has already been validated by ghorg_list_repos before reaching
-## this point; we still re-validate defensively because nothing else
-## stops a caller from invoking this function with arbitrary input.
+## standalone so it can be safely backgrounded for parallelism.
 clone_or_update_one() {
   local repo repo_dir url existing_url current_branch
   local safe_existing_url safe_branch
@@ -195,10 +192,9 @@ clone_or_update_one() {
       return 0
     fi
     [ "${verbose}" = '1' ] && printf '%s\n' "update: ${repo_dir}"
-    ## --ff-only refuses anything that isn't a clean fast-forward; safer
-    ## than `pull` for unattended runs where divergence would otherwise
-    ## attempt a merge. `--` separates options from positional args
-    ## even though no operand is an option here - belt and braces.
+    ## --ff-only refuses anything but a clean fast-forward; safer than
+    ## `pull` for unattended runs where divergence would otherwise
+    ## attempt a merge.
     git -C "${repo_dir}" fetch --prune --tags -- origin
     current_branch="$(git -C "${repo_dir}" symbolic-ref --short HEAD 2>/dev/null || true)"
     if [ -n "${current_branch}" ]; then
@@ -221,19 +217,13 @@ clone_or_update_one() {
     [ "${verbose}" = '1' ] && printf '%s\n' "clone: ${url}"
     clone_args=( clone )
     [ "${shallow}" = '1' ] && clone_args+=( --depth=1 )
-    ## Defense-in-depth against hostile origins:
-    ##   - protocol.file.allow=never blocks a malicious upstream from
-    ##     redirecting clone-time fetches through file:// URLs (used
-    ##     in past CVEs to read attacker-chosen local files).
-    ##   - protocol.ext.allow=never blocks the ext:: helper protocol
-    ##     which can launch arbitrary shell commands on clone.
+    ## protocol.file.allow=never / protocol.ext.allow=never block a
+    ## hostile upstream from redirecting a sub-fetch through file:// or
+    ## ext:: helper protocols (CVE-class).
     clone_args+=(
       --config protocol.file.allow=never
       --config protocol.ext.allow=never
     )
-    ## `--` ensures a hostile-looking URL or repo_dir starting with
-    ## `-` (which validation already rejects upstream) cannot be
-    ## interpreted as a git option.
     clone_args+=( -- "${url}" "${repo_dir}" )
     ## GIT_LFS_SKIP_SMUDGE=1 prevents the LFS smudge filter from
     ## auto-fetching arbitrary objects on clone if the upstream's
