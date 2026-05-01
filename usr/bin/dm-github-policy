@@ -670,7 +670,7 @@ audit_org_state() {
          fi
       done
    else
-      printf '%s\n' "  rulesets list: HTTP ${status}"
+      printf '%s\n' "  rulesets list: HTTP ${status} (token may lack admin:org)"
    fi
 
    ## Personal access tokens: count pending requests + count approved
@@ -706,7 +706,7 @@ audit_org_state() {
          printf '%s\n' "    approved tokens on first page: ${safe_approved}"
          ;;
       *)
-         printf '%s\n' "    approved tokens endpoint: HTTP ${status}"
+         printf '%s\n' "    approved tokens endpoint: HTTP ${status} (token may lack admin:org)"
          ;;
    esac
 
