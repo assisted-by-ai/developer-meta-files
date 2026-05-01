@@ -167,11 +167,26 @@ clone_or_update_one() {
     [ "$verbose" = '1' ] && printf '%s\n' "clone: $url"
     clone_args=( clone )
     [ "$shallow" = '1' ] && clone_args+=( --depth=1 )
+    ## Defense-in-depth against hostile origins:
+    ##   - protocol.file.allow=never blocks a malicious upstream from
+    ##     redirecting clone-time fetches through file:// URLs (used
+    ##     in past CVEs to read attacker-chosen local files).
+    ##   - protocol.ext.allow=never blocks the ext:: helper protocol
+    ##     which can launch arbitrary shell commands on clone.
+    clone_args+=(
+      --config protocol.file.allow=never
+      --config protocol.ext.allow=never
+    )
     ## `--` ensures a hostile-looking URL or repo_dir starting with
     ## `-` (which validation already rejects upstream) cannot be
     ## interpreted as a git option.
     clone_args+=( -- "$url" "$repo_dir" )
-    git "${clone_args[@]}"
+    ## GIT_LFS_SKIP_SMUDGE=1 prevents the LFS smudge filter from
+    ## auto-fetching arbitrary objects on clone if the upstream's
+    ## .gitattributes points binary files at LFS. Operators who
+    ## genuinely want LFS payloads can pre-export the env var to
+    ## something other than 1.
+    GIT_LFS_SKIP_SMUDGE="${GIT_LFS_SKIP_SMUDGE:-1}" git "${clone_args[@]}"
   fi
 }
 

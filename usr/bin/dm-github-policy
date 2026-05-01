@@ -259,9 +259,13 @@ upsert_org_ruleset() {
 
    if [ -n "$existing_id" ] && [ "$existing_id" != "null" ]; then
       ## Validate id is numeric before placing it into a URL path.
-      if ! [[ "$existing_id" =~ ^[0-9]+$ ]]; then
+      ## Length cap (GHORG_MAX_ID_LEN=20) prevents a hostile API from
+      ## pushing a 10,000-digit "numeric" string through the regex
+      ## check and into a URL path.
+      if ! [[ "$existing_id" =~ ^[0-9]+$ ]] || \
+         [ "${#existing_id}" -gt "$GHORG_MAX_ID_LEN" ]; then
          safe_id="$(ghorg_safe_print 32 "$existing_id")"
-         printf '%s\n' "warn: $org: ruleset id $safe_id not numeric; refusing" >&2
+         printf '%s\n' "warn: $org: ruleset id $safe_id not a valid numeric id; refusing" >&2
          return 1
       fi
       api_call "${org}: update ruleset id=${existing_id} (${name})" \
@@ -332,10 +336,12 @@ apply_code_security_config() {
       | head --lines=1)"
 
    if [ -n "$existing_id" ] && [ "$existing_id" != 'null' ]; then
-      if ! [[ "$existing_id" =~ ^[0-9]+$ ]]; then
+      ## Numeric + length cap; see GHORG_MAX_ID_LEN comment in lib.
+      if ! [[ "$existing_id" =~ ^[0-9]+$ ]] || \
+         [ "${#existing_id}" -gt "$GHORG_MAX_ID_LEN" ]; then
          safe_id="$(ghorg_safe_print 32 "$existing_id")"
          printf '%s\n' \
-            "warn: $org: code-security config id $safe_id not numeric; refusing" >&2
+            "warn: $org: code-security config id $safe_id not a valid numeric id; refusing" >&2
          api_record warn
          return 1
       fi

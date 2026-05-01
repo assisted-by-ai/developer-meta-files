@@ -40,6 +40,31 @@
 ## Bodies that are echoed verbatim for error reporting (HTTP 4xx/5xx
 ## payloads) are always passed through ghorg_safe_print first; raw
 ## body bytes never reach the terminal.
+##
+## Resource caps against a hostile or misbehaving server:
+##   - --max-filesize 10485760 (10 MB)  per response body
+##   - --connect-timeout 30, --max-time 120 (seconds)
+##   - --max-redirs GHORG_MAX_REDIRS (default 5) bounds redirect chain
+##     length; modern curl already strips Authorization on cross-host
+##     redirect, so the cap here is for request-URL exfil, not token
+##     leak.
+##   - GHORG_MAX_PAGES (default 100) caps pagination depth so a server
+##     returning 100 results forever cannot keep ghorg_list_repos
+##     looping until OOM.
+##   - GHORG_MAX_ID_LEN (20) caps the byte length of any numeric id
+##     extracted from a body before it is interpolated into a URL
+##     path - bounds a potential 10000-digit "numeric" payload that
+##     would still pass ^[0-9]+$.
+##   - GHORG_MAX_BACKOFF_SECONDS (3600) caps a single sleep computed
+##     from Retry-After / X-RateLimit-Reset.
+##
+## Clone-time hardening (github-org-clone):
+##   - GIT_LFS_SKIP_SMUDGE=1 prevents the LFS smudge filter from
+##     auto-fetching attacker-chosen objects on clone.
+##   - --config protocol.file.allow=never and protocol.ext.allow=never
+##     block the file:// and ext:: helper protocols, which have been
+##     used in past CVEs to read local files or run shell commands
+##     when a hostile upstream redirects a sub-fetch.
 
 GHORG_API="${GHORG_API:-https://api.github.com}"
 
@@ -210,6 +235,25 @@ GHORG_MAX_RETRIES="${GHORG_MAX_RETRIES:-3}"
 ## to wait longer than this (e.g. via X-RateLimit-Reset on a quiet hour
 ## boundary), refuse to wait silently and let the caller decide.
 GHORG_MAX_BACKOFF_SECONDS="${GHORG_MAX_BACKOFF_SECONDS:-3600}"
+## Hard cap on pagination depth for ghorg_list_repos. A hostile or
+## misbehaving API could keep returning 100 results per page forever;
+## without this cap the pager loop would run until the local process
+## ran out of memory or the rate-limit budget. 100 pages at 100 repos
+## per page = 10,000 repos, well above any real org's repo count.
+GHORG_MAX_PAGES="${GHORG_MAX_PAGES:-100}"
+## Maximum permitted redirects on a single API call. The GitHub REST
+## API does not normally redirect within itself; bounding this guards
+## against a hostile / MITM'd response that injects a redirect chain
+## to leak request URLs to an attacker-controlled host. (Modern curl
+## already strips the Authorization header on cross-host redirect by
+## default, so the token itself does not leak; this caps the chain.)
+GHORG_MAX_REDIRS="${GHORG_MAX_REDIRS:-5}"
+## Hard cap on the byte length of any numeric ID extracted from an
+## API response before that ID is interpolated into a URL path. The
+## ^[0-9]+$ regex check would otherwise accept a string of arbitrary
+## length, giving a hostile API a way to push a 10,000-byte URL
+## fragment through.
+GHORG_MAX_ID_LEN=20
 
 ## Returns a backoff duration in seconds for a given retry attempt
 ## (0-indexed). 30s, 60s, 120s, 240s ... bounded by
@@ -366,6 +410,7 @@ ghorg_api() {
     --silent
     --show-error
     --location
+    --max-redirs "$GHORG_MAX_REDIRS"
     --proto '=https'
     --proto-redir '=https'
     --connect-timeout 30
@@ -551,6 +596,14 @@ ghorg_list_repos() {
 
   page=1
   while true ; do
+    if [ "$page" -gt "$GHORG_MAX_PAGES" ]; then
+      ## Hostile / misbehaving API returning 100 results forever would
+      ## otherwise keep this loop alive indefinitely. Stop and warn so
+      ## the operator can investigate rather than silently truncating.
+      printf '%s\n' \
+        "warn: ghorg_list_repos: hit pagination cap GHORG_MAX_PAGES=$GHORG_MAX_PAGES for $safe_owner; possible runaway pager" >&2
+      break
+    fi
     result="$(ghorg_api GET "${api_base}&page=${page}")" || return 1
     status="$(ghorg_status_of "$result")"
     body="$(ghorg_body_of "$result")"
