@@ -10,7 +10,11 @@ purpose.
 | General threat model + trust boundaries | [`agents/security.md`](agents/security.md) |
 | github-org-* / dm-github-policy / dm-fork-sync specifics | [`agents/github-org-tools.md`](agents/github-org-tools.md) |
 
-This repo hosts the canonical bash style guide for the assisted-by-ai
-org. Other repos (derivative-maker, helper-scripts) cross-link here
-rather than duplicating. Eventual home is a shared `.github` org repo;
-developer-meta-files hosts it in the meantime.
+This repo hosts the canonical bash style guide for the following organizations.
+
+* Kicksecure
+* Whonix
+* org-ai-assisted
+
+Other repos (derivative-maker, helper-scripts) cross-link here
+rather than duplicating.

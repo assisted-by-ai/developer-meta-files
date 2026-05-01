@@ -47,10 +47,10 @@ Clone-time hardening in `github-org-clone`:
 - Any new place an API-derived string flows into a `printf` for the
   operator? It needs `ghorg_safe_print` first.
 - Any new `<( ... )` process substitution feeding a `read` loop?
-  Errors inside the substitution are invisible to errexit; consider
+  Errors inside the substitution are invisible to `errexit`; consider
   pre-capturing into a string with `$( ... )` instead, or document
   why the substitution form is intentional.
 - Any new background `&` worker that needs to update shared state?
   Bash variable updates from a backgrounded subshell are lost on
   join; use a tempfile + atomic appends (PIPE_BUF=4096 on Linux)
-  the way the api_counter_file pattern does.
+  the way the `api_counter_file` pattern does.

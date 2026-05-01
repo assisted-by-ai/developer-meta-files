@@ -28,18 +28,14 @@ comment line directly under the copyright block:
 
 ## AI-Assisted
 
-## <description of what the script does>
-```
-
-For Markdown files, append `(AI-Assisted)` to the H1 title:
-
-```
-# AGENTS.md (AI-Assisted)
+## <brief description of what the script does>
 ```
 
 This is the only attribution the project accepts. No author lines,
-no co-author lines, no individual credits in source files. The
-marker exists so reviewers can `grep -r AI-Assisted` to find files
+no co-author lines, no individual credits in source files. This is to
+discourage contribution spam to receive attribution.
+
+The marker exists so reviewers can `grep -r -- AI-Assisted` to find files
 that warrant extra scrutiny, not as a credit line.
 
 Pre-existing files that an AI tool only edits do not get the marker
@@ -58,9 +54,9 @@ shopt -s inherit_errexit
 shopt -s shift_verbose
 ```
 
-`inherit_errexit` makes `errexit` apply inside `$( ... )` substitutions
-(off by default in bash 5.x). `shift_verbose` makes `shift` log when
-called past argv end.
+* `inherit_errexit` makes `errexit` apply inside `$( ... )` substitutions
+(off by default in bash 5.x).
+* `shift_verbose` makes `shift` log when called past argv end.
 
 ## Variables
 
@@ -90,6 +86,8 @@ foo() {
 * Variable names in messages should be wrapped in single quotes so
   trailing/leading whitespace shows: `printf '%s\n' "error: '${path}'
   not found" >&2`.
+* Do not use very short var names such as `${e}`. Variable names should
+  be descriptive.
 
 ## printf
 
@@ -101,18 +99,23 @@ genuinely need shell-escaping), no extra `\n` in the format.
   one open/close quote pair.
 * Multiple distinct lines: one `printf '%s\n' "..."` per line.
 * Blank line: `printf '%s\n' ""` (not `\n` in the format).
+* Double quotes preferred for the string. `printf '%s\n' "string"`
+* Single quotes for string are also acceptable if more readable in
+  specific cases such as: `printf '%s\n' '"has" "a" "lot" "quotes"'`
+  to avoid escaping `\"`.
 
 ## Flags
 
 * Long option names whenever the tool supports one: `--quiet`,
-  `--ignore-case`, `--lines=1`, `--unique`. `wc --lines`, `sort
-  --unique`, etc.
+  `--ignore-case`, `--lines=1`, `--unique`. `wc --lines`,
+  `sort --unique`, etc.
 * Combined short flags get split: `rm -rf` -> `rm -r -f`,
   `declare -gA` -> `declare -g -A`.
 * End-of-options separator `--` everywhere the tool supports one and
   positional args follow flags. Verified working before adding:
   `git`, `grep`, `sed`, `tr`, `jq`, `head`, `tail`, `stat`,
   `mktemp`, `wc`, `sort`, `cat`, `rm`, `safe-rm`, `mkdir`, `find`.
+  Do verify end-of-options separator being supported before use.
 
 ## Case statements
 
@@ -199,7 +202,7 @@ standalone script under `ci/` and have the workflow call it:
 
 Reasons:
 
-* shellcheck only sees real `.sh` files, not YAML blocks. Inline
+* `shellcheck` only sees real `.sh` files, not YAML blocks. Inline
   shell silently bypasses linting.
 * A standalone script can be reproduced from a developer machine.
   Inline-in-YAML is reproducible only by re-running the workflow.
@@ -245,6 +248,7 @@ Use `log` and `die` from `helper-scripts/log_run_die.sh`:
 ```
 log error "couldn't read '${path}'"   ## log only
 log warn  "..."
+log notice  "..."
 log info  "..."
 die 1 "fatal: ..."                     ## logs error then exit 1
 [ "$#" -ge 2 ] || die 64 "missing value for --include"
