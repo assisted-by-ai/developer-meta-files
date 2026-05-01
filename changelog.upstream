@@ -1,3 +1,44 @@
+commit 48f465b480e289a44dc5287f9f1d1efa72602605
+Merge: 2f61fc0 c069ca4
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Fri May 1 07:13:52 2026 -0400
+
+    Merge remote-tracking branch 'assisted-by-ai/claude/style-and-org-vars-X9b1n'
+
+commit c069ca4a7c79cc4daf4e0aec59fd3ab7652956bc
+Author: Claude <noreply@anthropic.com>
+Date:   Fri May 1 11:09:00 2026 +0000
+
+    dm-github-policy: 2FA messaging now reflects Nov 2024 GA behavior
+
+    Per the Nov 2024 GA change (github.blog/changelog/2024-11-07-...),
+    enabling org 2FA enforcement no longer REMOVES non-compliant
+    members - they keep membership but are blocked from org resources
+    until they enroll. Three places had the outdated wording:
+
+      * --apply step 4b skip message: refers to the new behavior plus
+        the platform-wide 2FA mandate that GitHub is rolling out, which
+        means the org-level toggle just front-runs the inevitable.
+      * --audit "members lacking 2FA" header: was "would be removed by
+        enforcement", now "would lose org access until they enroll".
+      * audit_org_state header comment: was "two changes most likely
+        to surprise" (Allowed-Actions tightening AND member removal);
+        drops the member-removal half.
+
+    Also confirmed via the OpenAPI spec that there is still no REST
+    setter for two_factor_requirement_enabled (it remains read-only
+    on GET /orgs/{org}; not in PATCH /orgs/{org} request schema). So
+    this stays a UI-only step from --apply's perspective. The skip
+    message + UI URL is unchanged.
+
+    AI-Assisted
+
+commit 2f61fc0a35e7307174a42264c7e156953c7edcdf
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Fri May 1 10:58:15 2026 +0000
+
+    bumped changelog version
+
 commit de964e753734b96178cbe4e28f204a830548e2ae
 Merge: f405bad c7572a9
 Author: Patrick Schleizer <adrelanos@whonix.org>
