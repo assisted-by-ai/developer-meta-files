@@ -599,7 +599,7 @@ ghorg_account_type() {
 ghorg_list_repos() {
   local owner inc_private inc_archived inc_forks
   local account_type api_base auth_user jq_filter
-  local page result body status count name safe_owner
+  local page result body status count name safe_owner names_text
   local -a jq_clauses
 
   owner="$1"
@@ -671,6 +671,14 @@ ghorg_list_repos() {
     fi
     count="$(printf '%s' "${body}" | jq -- 'length')"
     [ "${count}" = '0' ] && break
+
+    ## Capture jq output into a string first, then iterate. Avoids
+    ## "while ... < <(printf | jq)" where the subshell's exit is
+    ## invisible to errexit + pipefail; if jq failed mid-pipeline
+    ## the loop would silently see no input and we would think the
+    ## page was empty.
+    names_text="$(printf '%s' "${body}" | jq -r -- "${jq_filter}")"
+
     ## Validate every name returned by the API before passing it on.
     ## A hostile or impersonated API endpoint could otherwise smuggle
     ## path-traversal, argument-injection, or unicode-escape payloads
@@ -680,7 +688,8 @@ ghorg_list_repos() {
       if ghorg_validate_name "${name}" repo; then
         printf '%s\n' "${name}"
       fi
-    done < <(printf '%s' "${body}" | jq -r -- "${jq_filter}")
+    done <<< "${names_text}"
+
     [ "${count}" -lt 100 ] && break
     page=$(( page + 1 ))
   done
