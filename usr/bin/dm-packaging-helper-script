@@ -813,6 +813,9 @@ pkg_claude_md_pointer_do() {
 '# CLAUDE.md
 
 See [AGENTS.md](AGENTS.md).' > 'CLAUDE.md'
+
+   git add "CLAUDE.md"
+   git commit -m "add CLAUDE.md"
 }
 
 ## Harvests metadata from individual files under all projects except
