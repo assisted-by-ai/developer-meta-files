@@ -35,8 +35,9 @@ if ! command -v genmkfile >/dev/null 2>&1; then
 fi
 
 readonly clone_dir='/tmp/helper-scripts-install'
-readonly upstream_url='https://github.com/Kicksecure/helper-scripts.git'
+readonly UPSTREAM_OWNER='Kicksecure'
+readonly upstream_url="https://github.com/${UPSTREAM_OWNER}/helper-scripts.git"
 
-git clone --depth=1 --branch=master -- "${upstream_url}" "${clone_dir}"
+git clone --depth=1 --no-tags --branch=master -- "${upstream_url}" "${clone_dir}"
 cd -- "${clone_dir}"
 GENMKFILE_DEBUG=1 genmkfile install

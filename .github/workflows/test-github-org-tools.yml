@@ -74,13 +74,9 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Install genmkfile
-        env:
-          CI: "true"
         run: ./ci/install-genmkfile.sh
 
       - name: Install helper-scripts (provides sanitize-string)
-        env:
-          CI: "true"
         run: ./ci/install-helper-scripts.sh
 
       - name: Install developer-meta-files
@@ -90,12 +86,10 @@ jobs:
         run: sanitize-string -- nolimit "smoke test"
 
       - name: Run mock-API test suite
-        env:
-          CI: "true"
         run: ./ci/test-github-org-tools.sh
 
-      - name: Live unauth smoke (best-effort; rate-limit may skip)
-        continue-on-error: true
-        env:
-          CI: "true"
-        run: ./ci/probe-live-unauth.sh
+      ## The live unauth smoke probe used to live here. It moved to
+      ## .github/workflows/live.yml because it is a real-API call,
+      ## logically distinct from the mock-API test suite this
+      ## workflow runs. See agents/bash-style-guide.md "workflow YAML
+      ## and ci scripts share a prefix".

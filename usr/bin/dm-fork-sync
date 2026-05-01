@@ -16,6 +16,11 @@ set -o errtrace
 shopt -s inherit_errexit
 shopt -s shift_verbose
 
+# shellcheck source=/usr/libexec/helper-scripts/log_run_die.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/log_run_die.sh
+# shellcheck source=/usr/libexec/helper-scripts/has.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
+
 ## Mirror destination: the GitHub org that holds forks of every
 ## source-org repo. Production target.
 readonly MIRROR='org-ai-assisted'
@@ -69,10 +74,8 @@ for arg in "$@"; do
    esac
 done
 
-if ! command -v github-org-fork >/dev/null 2>&1; then
-   printf '%s\n' 'error: github-org-fork not found on PATH (developer-meta-files install incomplete).' >&2
-   exit 1
-fi
+has github-org-fork \
+  || die 1 "'github-org-fork' not on PATH"
 
 for src in "${SOURCE_ORGS[@]}"; do
    printf '%s\n' ""

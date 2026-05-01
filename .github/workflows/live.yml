@@ -1,0 +1,108 @@
+---
+## Copyright (C) 2026 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+## AI-Assisted
+
+## Manual-trigger live-API workflow. Three steps against the real
+## GitHub REST API:
+##   1. unauth probe (ci/live-probe-unauth.sh): no token, smoke-tests
+##      the read paths against the public 'octokit' org.
+##   2. dm-github-policy --audit (auth): GET-only inspection of
+##      org-ai-assisted's current settings using GHORG_AUDIT_TOKEN.
+##   3. dm-github-policy --dry-run (auth): prints the PATCH/PUT/POST
+##      calls it WOULD make (prefixed "DRY-RUN:") but never mutates.
+##
+## All three are GET-only; safe with a read-only PAT. If a step
+## fails, the next step does not run (default GitHub Actions step
+## ordering); the unauth probe is gated by continue-on-error since
+## the unauth rate-limit can legitimately exhaust on a hot egress IP.
+##
+## To enable:
+##   1. Mint a fine-grained PAT under the user that owns
+##      org-ai-assisted access (read-only on Repository:
+##      Administration/Contents/Metadata/Webhooks and Organization:
+##      Administration/Members/Webhooks).
+##   2. Settings -> Secrets and variables -> Actions -> New repository
+##      secret named GHORG_AUDIT_TOKEN.
+##   3. Actions tab -> "github-org tools (live)" workflow -> Run
+##      workflow.
+##
+## To revoke: delete the secret in the same UI, or revoke the PAT in
+## the user's Developer settings.
+
+name: github-org tools (live)
+
+on:
+  workflow_dispatch:
+
+## Read-only on the checked-out source.
+permissions:
+  contents: read
+
+jobs:
+  live:
+    name: live-API audit + dry-run + unauth probe
+    runs-on: ubuntu-latest
+    container:
+      image: debian:trixie
+
+    ## Skip on forks so a fork's workflow can never use the upstream
+    ## secret (GitHub also blocks this by default for forked PRs, but
+    ## the explicit guard documents intent).
+    if: ${{ github.repository == 'assisted-by-ai/developer-meta-files' }}
+
+    steps:
+      - name: Install apt pre-reqs
+        run: |
+          set -o errexit
+          set -o nounset
+          set -o pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install --yes --no-install-recommends -- \
+            ca-certificates curl jq git sudo build-essential dctrl-tools \
+            python3 safe-rm
+
+      - name: Checkout developer-meta-files
+        uses: actions/checkout@v6
+
+      - name: Install genmkfile
+        run: ./ci/install-genmkfile.sh
+
+      - name: Install helper-scripts (provides sanitize-string)
+        run: ./ci/install-helper-scripts.sh
+
+      - name: Install developer-meta-files
+        run: GENMKFILE_DEBUG=1 genmkfile install
+
+      - name: Verify token secret is set
+        env:
+          token_present: ${{ secrets.GHORG_AUDIT_TOKEN != '' }}
+        run: |
+          set -o errexit
+          set -o nounset
+          set -o pipefail
+          if [ "$token_present" != 'true' ]; then
+             printf 'error: GHORG_AUDIT_TOKEN secret is not set on this repo.\n' >&2
+             printf '       Add it under Settings -> Secrets and variables -> Actions.\n' >&2
+             exit 1
+          fi
+          printf 'GHORG_AUDIT_TOKEN secret detected.\n'
+
+      - name: Live unauth smoke probe
+        ## continue-on-error: the unauth rate-limit can be exhausted
+        ## on a hot egress IP and that's not a real failure of the
+        ## tools.
+        continue-on-error: true
+        run: ./ci/live-probe-unauth.sh
+
+      - name: Run dm-github-policy --audit (live)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GHORG_AUDIT_TOKEN }}
+        run: dm-github-policy --audit
+
+      - name: Run dm-github-policy --dry-run (live)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GHORG_AUDIT_TOKEN }}
+        run: dm-github-policy --dry-run

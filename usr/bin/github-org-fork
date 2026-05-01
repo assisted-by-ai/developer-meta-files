@@ -85,10 +85,12 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     --include)
+      [ "$#" -ge 2 ] || die 64 "missing value for --include"
       include_re="$2"
       shift 2
       ;;
     --exclude)
+      [ "$#" -ge 2 ] || die 64 "missing value for --exclude"
       exclude_re="$2"
       shift 2
       ;;
@@ -105,25 +107,25 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     --actions)
+      [ "$#" -ge 2 ] || die 64 "missing value for --actions"
       case "$2" in
         enable|disable|leave)
           actions_state="$2"
           ;;
         *)
-          printf '%s\n' "invalid --actions value: '$2'" >&2
-          exit 64
+          die 64 "invalid --actions value: '$2'"
           ;;
       esac
       shift 2
       ;;
     --workflow-perms)
+      [ "$#" -ge 2 ] || die 64 "missing value for --workflow-perms"
       case "$2" in
         read|write|leave)
           workflow_perms="$2"
           ;;
         *)
-          printf '%s\n' "invalid --workflow-perms value: '$2'" >&2
-          exit 64
+          die 64 "invalid --workflow-perms value: '$2'"
           ;;
       esac
       shift 2
@@ -145,8 +147,7 @@ while [ "$#" -gt 0 ]; do
       break
       ;;
     -*)
-      printf '%s\n' "unknown option: '$1'" >&2
-      exit 64
+      die 64 "unknown option: '$1'"
       ;;
     *)
       break
@@ -163,6 +164,8 @@ source_owner="$1"
 target_owner="$2"
 
 ghorg_require_deps
+ghorg_validate_name "${source_owner}" user
+ghorg_validate_name "${target_owner}" user
 
 ## POST /repos/{owner}/{repo}/forks. The `organization` body field
 ## applies only when the target is an Organization; for a User it must
@@ -324,11 +327,8 @@ main() {
   target_type="$(ghorg_account_type "${target_owner}")"
   if [ "${target_type}" = 'User' ]; then
     auth_user="$(ghorg_authenticated_user)"
-    if [ "${auth_user}" != "${target_owner}" ]; then
-      printf '%s\n' \
-        "error: target user '${target_owner}' does not match auth user '${auth_user}'; aborting" >&2
-      exit 1
-    fi
+    [ "${auth_user}" = "${target_owner}" ] \
+      || die 1 "target user '${target_owner}' does not match auth user '${auth_user}'"
   fi
 
   source_repos="$(ghorg_list_repos "${source_owner}" \

@@ -25,8 +25,22 @@
 ## protocol.file.allow=never / protocol.ext.allow=never on `git clone`
 ## to block LFS smudge-fetch and the file:// / ext:: helper protocols.
 
+# shellcheck source=/usr/libexec/helper-scripts/strings.bsh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/strings.bsh
+# shellcheck source=/usr/libexec/helper-scripts/log_run_die.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/log_run_die.sh
+# shellcheck source=/usr/libexec/helper-scripts/has.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
+
 ## API base URL. Override to point at a captured-replay server.
 [[ -v GHORG_API ]] || GHORG_API='https://api.github.com'
+
+## REST API version pin sent in the X-GitHub-Api-Version header.
+## Override only after reading the breaking-changes list for the new
+## version and verifying the endpoints we call are unaffected.
+## https://docs.github.com/en/rest/about-the-rest-api/api-versions
+## https://docs.github.com/en/rest/about-the-rest-api/breaking-changes
+[[ -v GHORG_API_VERSION ]] || GHORG_API_VERSION='2026-03-10'
 
 ## Per documented GitHub limits.
 GHORG_MAX_REPO_NAME_LEN=100
@@ -79,41 +93,55 @@ ghorg_authenticated_user_cached=''
 ## path (return, errexit, fall-through), so an enclosing `set -x`
 ## cannot leak the secret regardless of how this function exits.
 ghorg_token() {
-  local token_file mode
+  local token_file mode token default_config_dir default_token_path
   local -
 
   set +x
   if [ -n "${GITHUB_TOKEN:-}" ]; then
-    printf '%s' "${GITHUB_TOKEN}"
+    token="${GITHUB_TOKEN}"
+    [ "${#token}" -le 255 ] || { log error 'GITHUB_TOKEN exceeds 255 bytes'; return 1; }
+    ## stderr suppressed: check_is_alpha_numeric prints the value on
+    ## failure, which for a token would leak the secret.
+    check_is_alpha_numeric token 2>/dev/null \
+      || { log error 'GITHUB_TOKEN has disallowed characters'; return 1; }
+    printf '%s' "${token}"
     return 0
   fi
-  token_file="${GHORG_TOKEN_FILE:-${XDG_CONFIG_HOME:-${HOME}/.config}/github-token}"
+  default_config_dir="${XDG_CONFIG_HOME:-${HOME}/.config}"
+  default_token_path="${default_config_dir}/github-token"
+  token_file="${GHORG_TOKEN_FILE:-${default_token_path}}"
   if [ -L "${token_file}" ]; then
-    printf '%s\n' \
-      "error: '${token_file}' is a symlink; refusing to read token through it" >&2
+    log error "'${token_file}' is a symlink"
     return 1
   fi
   if [ ! -e "${token_file}" ]; then
-    printf '%s\n' \
-      "error: no GitHub token. Set GITHUB_TOKEN or write one line to '${token_file}' (chmod 600)." >&2
+    log error "no GitHub token. Set GITHUB_TOKEN or write one line to '${token_file}' (chmod 600)."
     return 1
   fi
   if [ ! -f "${token_file}" ]; then
-    printf '%s\n' "error: '${token_file}' is not a regular file" >&2
+    log error "'${token_file}' is not a regular file"
     return 1
   fi
   if [ ! -r "${token_file}" ]; then
-    printf '%s\n' "error: '${token_file}' is not readable" >&2
+    log error "'${token_file}' is not readable"
     return 1
   fi
   mode="$(stat -c '%a' -- "${token_file}" 2>/dev/null \
     || stat -f '%Lp' -- "${token_file}" 2>/dev/null \
-    || printf '%s' '600')"
-  if [ "${mode}" != '600' ] && [ "${mode}" != '400' ]; then
-    printf '%s\n' "error: '${token_file}' permissions are '${mode}', expected 600 or 400" >&2
+    || true)"
+  if [ -z "${mode}" ]; then
+    log error "cannot stat '${token_file}'"
     return 1
   fi
-  head --lines=1 -- "${token_file}" | tr -d '\r\n'
+  if [ "${mode}" != '600' ] && [ "${mode}" != '400' ]; then
+    log error "'${token_file}' permissions are '${mode}', expected 600 or 400"
+    return 1
+  fi
+  token="$(head --lines=1 -- "${token_file}" | tr -d '\r\n')"
+  [ "${#token}" -le 255 ] || { log error "'${token_file}' first line exceeds 255 bytes"; return 1; }
+  check_is_alpha_numeric token 2>/dev/null \
+    || { log error "'${token_file}' contains disallowed characters"; return 1; }
+  printf '%s' "${token}"
 }
 
 ## Verifies curl, jq, and sanitize-string are present. sanitize-string
@@ -123,10 +151,7 @@ ghorg_require_deps() {
   local cmd
 
   for cmd in curl jq sanitize-string; do
-    if ! command -v "${cmd}" >/dev/null 2>&1; then
-      printf '%s\n' "error: required command not found: '${cmd}'" >&2
-      return 1
-    fi
+    has "${cmd}" || { log error "required command not found: '${cmd}'"; return 1; }
   done
 }
 
@@ -176,30 +201,29 @@ ghorg_validate_name() {
   esac
 
   if [ -z "${name}" ]; then
-    printf '%s\n' "reject: empty '${kind}' name" >&2
+    log error "reject: empty '${kind}' name"
     return 1
   fi
   safe_name="$(ghorg_safe_print "${max_len}" "${name}")"
   if [ "${#name}" -gt "${max_len}" ]; then
-    printf '%s\n' "reject: '${kind}' name exceeds '${max_len}' chars: '${safe_name}'" >&2
+    log error "reject: '${kind}' name exceeds '${max_len}' chars: '${safe_name}'"
     return 1
   fi
   if ! [[ "${name}" =~ ^[A-Za-z0-9._-]+$ ]]; then
-    printf '%s\n' "reject: '${kind}' name has disallowed chars: '${safe_name}'" >&2
+    log error "reject: '${kind}' name has disallowed chars: '${safe_name}'"
     return 1
   fi
   case "${name}" in
     '.'|'..'|'.git')
-      printf '%s\n' "reject: reserved '${kind}' name: '${safe_name}'" >&2
+      log error "reject: reserved '${kind}' name: '${safe_name}'"
       return 1
       ;;
     '-'*)
-      printf '%s\n' \
-        "reject: '${kind}' name starts with dash (arg injection): '${safe_name}'" >&2
+      log error "reject: '${kind}' name starts with dash: '${safe_name}'"
       return 1
       ;;
     *'..'*)
-      printf '%s\n' "reject: '${kind}' name contains \"..\": '${safe_name}'" >&2
+      log error "reject: '${kind}' name contains \"..\": '${safe_name}'"
       return 1
       ;;
   esac
@@ -338,7 +362,7 @@ ghorg_api_cleanup_hdr_file() {
 ghorg_api() {
   ## Suspend xtrace so the token cannot be leaked via an enclosing
   ## `set -x`. `local -; set +x` restores caller's options on exit.
-  local method path body token hdr_file
+  local method path body token hdr_file default_token_path
   local attempt max status result wait body_text attempt_next
   local -a args
   local -
@@ -356,7 +380,24 @@ ghorg_api() {
     return 0
   fi
 
-  token="$(ghorg_token 2>/dev/null)" || token=''
+  is_whole_number "${GHORG_MAX_RETRIES}" || { log error 'GHORG_MAX_RETRIES must be unsigned integer'; return 1; }
+  is_whole_number "${GHORG_MAX_BACKOFF_SECONDS}" || { log error 'GHORG_MAX_BACKOFF_SECONDS must be unsigned integer'; return 1; }
+
+  ## Fail closed when auth was explicitly configured but invalid;
+  ## silently downgrading to anonymous would mask a bad token and
+  ## hit GitHub's 60/hr unauth rate limit unexpectedly. A non-empty
+  ## GHORG_TOKEN_FILE counts as "configured" even if the file is
+  ## missing - the operator clearly chose that path.
+  default_token_path="${XDG_CONFIG_HOME:-${HOME}/.config}/github-token"
+  if ! token="$(ghorg_token 2>/dev/null)"; then
+    if [ -n "${GITHUB_TOKEN:-}" ] \
+      || [ -n "${GHORG_TOKEN_FILE:-}" ] \
+      || [ -e "${default_token_path}" ]; then
+      log error 'GitHub token configured but invalid'
+      return 1
+    fi
+    token=''
+  fi
   hdr_file="$(mktemp)"
   trap ghorg_api_cleanup_hdr_file RETURN
 
@@ -372,7 +413,7 @@ ghorg_api() {
     --max-filesize 10485760
     --request "${method}"
     --header 'Accept: application/vnd.github+json'
-    --header 'X-GitHub-Api-Version: 2022-11-28'
+    --header "X-GitHub-Api-Version: ${GHORG_API_VERSION}"
     --dump-header "${hdr_file}"
     --write-out '\nHTTP_STATUS:%{http_code}'
   )
@@ -417,8 +458,7 @@ ghorg_api() {
     esac
 
     if [ "${attempt}" -ge "${max}" ]; then
-      printf '%s\n' \
-        "warn: ghorg_api: gave up after '${max}' retries on HTTP '${status}' for '${method}' '${path}'" >&2
+      log warn "ghorg_api: gave up after '${max}' retries on HTTP '${status}' for '${method}' '${path}'"
       break
     fi
 
@@ -427,13 +467,11 @@ ghorg_api() {
       wait="$(ghorg_compute_backoff_seconds "${attempt}")"
     fi
     if [ "${wait}" -gt "${GHORG_MAX_BACKOFF_SECONDS}" ]; then
-      printf '%s\n' \
-        "warn: ghorg_api: server requested '${wait}'s wait, exceeds GHORG_MAX_BACKOFF_SECONDS='${GHORG_MAX_BACKOFF_SECONDS}'; aborting retry" >&2
+      log warn "ghorg_api: server requested '${wait}'s wait, exceeds GHORG_MAX_BACKOFF_SECONDS='${GHORG_MAX_BACKOFF_SECONDS}'"
       break
     fi
     attempt_next=$(( attempt + 1 ))
-    printf '%s\n' \
-      "info: ghorg_api: HTTP '${status}' for '${method}' '${path}'; sleeping '${wait}'s before retry '${attempt_next}'/'${max}'" >&2
+    log info "ghorg_api: HTTP '${status}' for '${method}' '${path}'; sleeping '${wait}'s before retry '${attempt_next}'/'${max}'"
     sleep -- "${wait}"
     attempt=$(( attempt + 1 ))
   done
@@ -466,7 +504,7 @@ ghorg_account_type() {
   body="$(ghorg_body_of "${result}")"
   safe_owner="$(ghorg_safe_print "${GHORG_MAX_USER_LOGIN_LEN}" "${owner}")"
   if [ "${status}" != '200' ]; then
-    printf '%s\n' "error: account type lookup for '${safe_owner}': HTTP '${status}'" >&2
+    log error "account type lookup for '${safe_owner}': HTTP '${status}'"
     return 1
   fi
   type="$(printf '%s' "${body}" | jq -r -- '.type')"
@@ -477,7 +515,7 @@ ghorg_account_type() {
     User|Organization) ;;
     *)
       safe_type="$(ghorg_safe_print 32 "${type}")"
-      printf '%s\n' "error: unexpected account type for '${safe_owner}': '${safe_type}'" >&2
+      log error "unexpected account type for '${safe_owner}': '${safe_type}'"
       return 1
       ;;
   esac
@@ -526,8 +564,7 @@ ghorg_list_repos() {
       if [ "${inc_private}" = '1' ]; then
         auth_user="$(ghorg_authenticated_user)" || return 1
         if [ "${owner}" != "${auth_user}" ]; then
-          printf '%s\n' \
-            "error: cannot list private repos of user '${owner}'; auth token belongs to '${auth_user}'" >&2
+          log error "cannot list private repos of user '${owner}'; auth token belongs to '${auth_user}'"
           return 1
         fi
         api_base="/user/repos?per_page=100&affiliation=owner"
@@ -568,7 +605,7 @@ ghorg_list_repos() {
     status="$(ghorg_status_of "${result}")"
     body="$(ghorg_body_of "${result}")"
     if [ "${status}" != '200' ]; then
-      printf '%s\n' "error: list repos for '${safe_owner}': HTTP '${status}'" >&2
+      log error "list repos for '${safe_owner}': HTTP '${status}'"
       return 1
     fi
     count="$(printf '%s' "${body}" | jq -- 'length')"
@@ -646,7 +683,7 @@ ghorg_repo_lookup() {
     *)
       safe_owner="$(ghorg_safe_print "${GHORG_MAX_USER_LOGIN_LEN}" "${owner}")"
       safe_repo="$(ghorg_safe_print "${GHORG_MAX_REPO_NAME_LEN}" "${repo}")"
-      printf '%s\n' "error: repo lookup '${safe_owner}/${safe_repo}': HTTP '${status}'" >&2
+      log error "repo lookup '${safe_owner}/${safe_repo}': HTTP '${status}'"
       return 2
       ;;
   esac
@@ -678,7 +715,7 @@ ghorg_repo_parent() {
   if [ "${status}" != '200' ]; then
     safe_owner="$(ghorg_safe_print "${GHORG_MAX_USER_LOGIN_LEN}" "${owner}")"
     safe_repo="$(ghorg_safe_print "${GHORG_MAX_REPO_NAME_LEN}" "${repo}")"
-    printf '%s\n' "warn: parent lookup for '${safe_owner}/${safe_repo}': HTTP '${status}'" >&2
+    log warn "parent lookup for '${safe_owner}/${safe_repo}': HTTP '${status}'"
     return 1
   fi
   body="$(ghorg_body_of "${result}")"
@@ -714,13 +751,13 @@ ghorg_authenticated_user() {
   result="$(ghorg_api GET "/user")" || return 1
   status="$(ghorg_status_of "${result}")"
   if [ "${status}" != '200' ]; then
-    printf '%s\n' "error: cannot read authenticated user: HTTP '${status}'" >&2
+    log error "cannot read authenticated user: HTTP '${status}'"
     return 1
   fi
   body="$(ghorg_body_of "${result}")"
   login="$(printf '%s' "${body}" | jq -r -- '.login')"
   if [ -z "${login}" ] || [ "${login}" = 'null' ]; then
-    printf '%s\n' 'error: authenticated user response missing .login' >&2
+    log error 'authenticated user response missing .login'
     return 1
   fi
   ## Validate before caching - the login flows into equality checks

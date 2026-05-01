@@ -17,13 +17,13 @@ set -o errtrace
 shopt -s inherit_errexit
 shopt -s shift_verbose
 
-if ! command -v github-org-fork >/dev/null 2>&1; then
-   printf '%s\n' \
-      'error: github-org-fork not found on PATH (developer-meta-files install incomplete).' >&2
-   exit 1
-fi
 # shellcheck source=/usr/libexec/developer-meta-files/github-org-lib.bsh
 source /usr/libexec/developer-meta-files/github-org-lib.bsh
+# shellcheck source=/usr/libexec/helper-scripts/has.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
+
+has github-org-fork \
+  || die 1 "'github-org-fork' not on PATH"
 
 ## Orgs to which the policy is applied. org-ai-assisted is our mirror
 ## org. Kicksecure and Whonix can be added here once an admin token
@@ -176,8 +176,7 @@ while [ "$#" -gt 0 ]; do
          ;;
       *)
          arg_safe="$(ghorg_safe_print 64 "$1")"
-         printf '%s\n' "unknown argument: '${arg_safe}'" >&2
-         exit 64
+         die 64 "unknown argument: '${arg_safe}'"
          ;;
    esac
 done
@@ -219,7 +218,7 @@ api_call() {
    }
    status="$(ghorg_status_of "${result}")"
    case "${status}" in
-      200|201|204)
+      200|201|202|204)
          printf '%s\n' "ok:   ${label} [${status}]"
          api_record ok
          return 0
@@ -253,7 +252,7 @@ upsert_org_ruleset() {
       return 0
    fi
 
-   result="$(ghorg_api GET "/orgs/${org}/rulesets")" || return 1
+   result="$(ghorg_api GET "/orgs/${org}/rulesets?per_page=100")" || return 1
    status="$(ghorg_status_of "${result}")"
    if [ "${status}" != '200' ]; then
       printf '%s\n' "warn: '${org}': list rulesets returned '${status}'" >&2
@@ -272,7 +271,7 @@ upsert_org_ruleset() {
       if ! [[ "${existing_id}" =~ ^[0-9]+$ ]] || \
          [ "${#existing_id}" -gt "${GHORG_MAX_ID_LEN}" ]; then
          safe_id="$(ghorg_safe_print 32 "${existing_id}")"
-         printf '%s\n' "warn: '${org}': ruleset id '${safe_id}' not a valid numeric id; refusing" >&2
+         printf '%s\n' "warn: '${org}': ruleset id '${safe_id}' not a valid numeric id" >&2
          return 1
       fi
       api_call "${org}: update ruleset id=${existing_id} (${name})" \
@@ -326,7 +325,7 @@ DRY-RUN: ${org}: set code-security configuration default_for_new_repos=all"
    fi
 
    ## Find existing configuration by name.
-   list_result="$(ghorg_api GET "/orgs/${org}/code-security/configurations")" \
+   list_result="$(ghorg_api GET "/orgs/${org}/code-security/configurations?per_page=100")" \
       || { api_record warn; return 1; }
    list_status="$(ghorg_status_of "${list_result}")"
    if [ "${list_status}" != '200' ]; then
@@ -349,7 +348,7 @@ ${list_safe_body}" >&2
          [ "${#existing_id}" -gt "${GHORG_MAX_ID_LEN}" ]; then
          safe_id="$(ghorg_safe_print 32 "${existing_id}")"
          printf '%s\n' \
-            "warn: '${org}': code-security config id '${safe_id}' not a valid numeric id; refusing" >&2
+            "warn: '${org}': code-security config id '${safe_id}' not a valid numeric id" >&2
          api_record warn
          return 1
       fi
@@ -657,7 +656,7 @@ audit_org_state() {
    fi
 
    ## Existing rulesets matching the names we'd upsert (branch + tag).
-   result="$(ghorg_api GET "/orgs/${org}/rulesets")" || true
+   result="$(ghorg_api GET "/orgs/${org}/rulesets?per_page=100")" || true
    status="$(ghorg_status_of "${result}")"
    if [ "${status}" = '200' ]; then
       ruleset_body="$(ghorg_body_of "${result}")"

@@ -38,14 +38,15 @@ if [ "${CI:-}" != "true" ]; then
    exit 1
 fi
 
-if ! command -v sanitize-string >/dev/null 2>&1; then
-   printf '%s\n' \
-      'error: sanitize-string not found on PATH.' \
-      '       Install helper-scripts (see ci/install-helper-scripts.sh).' >&2
-   exit 1
-fi
+# shellcheck source=/usr/libexec/helper-scripts/has.sh
+source /usr/libexec/helper-scripts/has.sh
 
-# shellcheck disable=SC1091
+has sanitize-string \
+   || { printf '%s\n' \
+      'error: sanitize-string not found on PATH.' \
+      '       Install helper-scripts (see ci/install-helper-scripts.sh).' >&2; exit 1; }
+
+# shellcheck source=/usr/libexec/developer-meta-files/github-org-lib.bsh
 source /usr/libexec/developer-meta-files/github-org-lib.bsh
 
 fail=0
