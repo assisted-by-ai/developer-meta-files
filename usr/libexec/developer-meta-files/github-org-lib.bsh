@@ -479,8 +479,13 @@ ghorg_api() {
   printf '%s\n' "${result}"
 }
 
-ghorg_status_of() { printf '%s\n' "$1" | tail --lines=1 | sed -- 's/^HTTP_STATUS://'; }
-ghorg_body_of()   { printf '%s\n' "$1" | sed -- '${d}'; }
+ghorg_status_of() {
+  printf '%s\n' "$1" | tail --lines=1 | sed -- 's/^HTTP_STATUS://'
+}
+
+ghorg_body_of() {
+  printf '%s\n' "$1" | sed -- '${d}'
+}
 
 ## Probes whether $1 is a User or an Organization on GitHub. Result is
 ## cached in ghorg_account_type_cache (declared at top of file) so

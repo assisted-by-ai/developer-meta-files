@@ -29,48 +29,47 @@ source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
 # shellcheck source=../libexec/developer-meta-files/github-org-lib.bsh
 source /usr/libexec/developer-meta-files/github-org-lib.bsh
 
-has jq || die 1 "'jq' not on PATH"
-
 ghorg_require_deps
 
 ## /user identifies the auth principal; should match an Owner of any
 ## org the caller plans to mutate.
-user_result="$(ghorg_api GET '/user')" \
-  || die 1 'token rejected by /user'
+user_result="$(ghorg_api GET '/user')" || die 1 'token rejected by /user'
+
 user_status="$(ghorg_status_of "${user_result}")"
-[ "${user_status}" = '200' ] \
-  || die 1 "/user returned HTTP '${user_status}'"
+
+[ "${user_status}" = '200' ] || die 1 "/user returned HTTP '${user_status}'"
+
 user_body="$(ghorg_body_of "${user_result}")"
+
 login_raw="$(printf '%s' "${user_body}" | jq -r -- '.login')"
-[ -n "${login_raw}" ] && [ "${login_raw}" != 'null' ] \
-  || die 1 'response missing .login'
+
+[ -n "${login_raw}" ] && [ "${login_raw}" != 'null' ] || die 1 'response missing .login'
+
 login="$(ghorg_safe_print "${GHORG_MAX_USER_LOGIN_LEN}" "${login_raw}")"
 
 ## /rate_limit shows budget across resources. .resources.core is the
 ## main bucket dm-fork-sync / dm-github-policy consume.
-rl_result="$(ghorg_api GET '/rate_limit')" \
-  || die 1 'rate_limit endpoint failed'
+rl_result="$(ghorg_api GET '/rate_limit')" || die 1 'rate_limit endpoint failed'
+
 rl_status="$(ghorg_status_of "${rl_result}")"
-[ "${rl_status}" = '200' ] \
-  || die 1 "/rate_limit returned HTTP '${rl_status}'"
+
+[ "${rl_status}" = '200' ] || die 1 "/rate_limit returned HTTP '${rl_status}'"
+
 rl_body="$(ghorg_body_of "${rl_result}")"
 
 remaining="$(printf '%s' "${rl_body}" | jq -r -- '.resources.core.remaining')"
 limit="$(printf '%s' "${rl_body}" | jq -r -- '.resources.core.limit')"
 reset_epoch="$(printf '%s' "${rl_body}" | jq -r -- '.resources.core.reset')"
 
-is_whole_number "${remaining}" \
-  || die 1 "non-numeric core.remaining: '${remaining}'"
-is_whole_number "${limit}" \
-  || die 1 "non-numeric core.limit: '${limit}'"
-is_whole_number "${reset_epoch}" \
-  || die 1 "non-numeric core.reset: '${reset_epoch}'"
+is_whole_number "${remaining}" || die 1 "non-numeric core.remaining: '${remaining}'"
+is_whole_number "${limit}" || die 1 "non-numeric core.limit: '${limit}'"
+is_whole_number "${reset_epoch}" || die 1 "non-numeric core.reset: '${reset_epoch}'"
 
 reset_iso="$(date -u -d "@${reset_epoch}" '+%Y-%m-%dT%H:%M:%SZ')"
 
-printf '%s\n' "login: ${login}"
-printf '%s\n' "rate-limit core: ${remaining}/${limit} (resets at ${reset_iso})"
+log notice "login: ${login}"
+log notice "rate-limit core: ${remaining}/${limit} (resets at ${reset_iso})"
 
 if [ "${remaining}" -lt 100 ]; then
-   log warn "rate-limit core remaining is low (${remaining}/${limit}); consider waiting until reset"
+  log warn "rate-limit core remaining is low (${remaining}/${limit}); consider waiting until reset"
 fi
