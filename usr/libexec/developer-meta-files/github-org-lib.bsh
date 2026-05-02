@@ -95,8 +95,8 @@ ghorg_authenticated_user_cached=''
 ghorg_token() {
   local token_file mode token default_config_dir default_token_path
 
-  local -
-  set +x
+  xtrace_off
+  trap xtrace_restore RETURN
 
   if [ -n "${GITHUB_TOKEN:-}" ]; then
     token="${GITHUB_TOKEN}"
@@ -361,18 +361,17 @@ ghorg_api_cleanup_hdr_file() {
 }
 
 ghorg_api() {
-  ## Suspend xtrace so the token cannot be leaked via an enclosing
-  ## `set -x`. `local -; set +x` restores caller's options on exit.
   local method path body token hdr_file default_token_path
   local attempt max status result wait body_text attempt_next
   local -a args
-  local -
 
   method="$1"
   path="$2"
   body="${3:-}"
 
-  set +x
+  ## Suspend xtrace so the token cannot be leaked.
+  xtrace_off
+  trap xtrace_restore RETURN
 
   ## Mock mode short-circuits everything else. No retry needed: a test
   ## fixture either exists or it does not.
@@ -399,6 +398,7 @@ ghorg_api() {
     fi
     token=''
   fi
+
   hdr_file="$(mktemp)"
   trap ghorg_api_cleanup_hdr_file RETURN
 
