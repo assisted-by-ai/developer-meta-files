@@ -5,9 +5,8 @@
 
 ## AI-Assisted
 
-## Project-policy wrapper around `github-org-fork`. Mirrors Kicksecure
-## and Whonix into the org-ai-assisted GitHub org. Run
-## `dm-github-fork-sync --help` for the policy flags applied.
+## Project-policy wrapper around `github-org-fork`.
+## Mirrors Kicksecure and Whonix into the org-ai-assisted GitHub org.
 
 set -o errexit
 set -o nounset
@@ -43,7 +42,7 @@ readonly POLICY_FLAGS=(
 
 show_help() {
    cat <<'EOF'
-Project-policy wrapper around github-org-fork (from helper-scripts).
+Project-policy wrapper around github-org-fork.
 Mirrors the Kicksecure and Whonix orgs into the org-ai-assisted org
 with the settings the project requires:
 
@@ -51,7 +50,6 @@ with the settings the project requires:
   - issues, wiki, projects disabled on each mirror
   - GitHub Actions enabled on each mirror (so Claude Code can read
     CI logs from the mirror)
-  - in-workflow GITHUB_TOKEN constrained to read-only by default
 
 Usage:
   dm-github-fork-sync             ## sync all source orgs into the mirror
@@ -90,8 +88,7 @@ for arg in "$@"; do
    esac
 done
 
-has github-org-fork \
-  || die 1 "'github-org-fork' not on PATH"
+has github-org-fork || die 1 "'github-org-fork' not on PATH"
 
 for src in "${SOURCE_ORGS[@]}"; do
    printf '%s\n' ""

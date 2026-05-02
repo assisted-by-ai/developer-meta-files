@@ -5,8 +5,8 @@
 
 ## AI-Assisted
 
-## Shared functions for the github-org-* tools (clone/fork/push). Pure
-## bash + curl + jq, no proprietary dependencies. Source via:
+## Shared functions for the github-org-* tools (clone/fork/push).
+## Source via:
 ##   source /usr/libexec/developer-meta-files/github-org-lib.bsh
 
 ## THREAT MODEL
@@ -94,9 +94,10 @@ ghorg_authenticated_user_cached=''
 ## cannot leak the secret regardless of how this function exits.
 ghorg_token() {
   local token_file mode token default_config_dir default_token_path
-  local -
 
+  local -
   set +x
+
   if [ -n "${GITHUB_TOKEN:-}" ]; then
     token="${GITHUB_TOKEN}"
     [ "${#token}" -le 255 ] || { log error 'GITHUB_TOKEN exceeds 255 bytes'; return 1; }
