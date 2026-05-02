@@ -1,3 +1,127 @@
+commit 66bead41eb752d9dde651cbeef8b64c6dd007408
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Sat May 2 04:46:58 2026 -0400
+
+    .
+
+commit b002093ed051115874053b90ce6883a2945557e3
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Fri May 1 17:31:11 2026 -0400
+
+    agents
+
+commit 21b0b33553c3f48519c650a82cb50ca90c602142
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Fri May 1 16:45:27 2026 -0400
+
+    .
+
+commit 91344f128f033a359fdb6a604bf498551764705d
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Fri May 1 16:45:02 2026 -0400
+
+    add CLAUDE.md
+
+commit f462ab536a56e85c930f03917184dfc610c9d670
+Merge: 33e548b a06e4b6
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Fri May 1 16:42:19 2026 -0400
+
+    Merge remote-tracking branch 'assisted-by-ai/claude/style-and-org-vars-X9b1n'
+
+commit a06e4b67d5a1d61554f09bf26ee4e08536d9f7bf
+Author: Claude <noreply@anthropic.com>
+Date:   Fri May 1 19:32:01 2026 +0000
+
+    github-org tools + dm-github-policy + dm-fork-sync: full add + polish
+
+    New surface for managing the assisted-by-ai GitHub org, plus the CI
+    scripts and workflows that exercise it.
+
+    Tools (usr/bin/):
+    - github-org-clone, github-org-fork, github-org-push: per-repo and
+      per-org clone, fork, and push primitives. Parser guards on every
+      --option N pair, ghorg_validate_name on CLI-derived owners,
+      --jobs bounded 1..200, is_whole_number checks via strings.bsh.
+    - dm-github-policy: idempotent org policy applier (apply / audit /
+      dry-run) covering 2FA, members lacking 2FA, fork-PR approval,
+      workflow GITHUB_TOKEN permissions, allowed_actions, code-security
+      configuration upsert + attach + default, and branch + tag
+      rulesets.
+    - dm-fork-sync: sync forks from upstream orgs into the mirror org.
+
+    Library (usr/libexec/developer-meta-files/):
+    - github-org-lib.bsh: shared GHORG_API client. Sources strings.bsh,
+      log_run_die.sh, has.sh from helper-scripts directly (no transitive
+      reliance). Hostile-API hardening: GHORG_MAX_PAGES, GHORG_MAX_REDIRS,
+      GHORG_MAX_ID_LEN, GIT_LFS_SKIP_SMUDGE=1, git clone --config
+      protocol.file.allow=never / protocol.ext.allow=never. Token
+      handling: length cap + check_is_alpha_numeric on GITHUB_TOKEN and
+      on token-file content, fail closed when stat cannot read mode,
+      fail closed when configured token invalid (refuse anonymous
+      fallback). GHORG_API_VERSION env-overridable, default 2026-03-10
+      after auditing the breaking-changes list against our endpoints.
+      api_call accepts 200|201|202|204 (the attach POST returns 202).
+      ?per_page=100 on the code-security and rulesets list endpoints.
+
+    Workflows (.github/workflows/):
+    - test-github-org-tools.yml: mock-API suite (8 tests) under CI=true.
+    - live.yml: combined unauth probe + dm-github-policy --audit +
+      --dry-run against org-ai-assisted, GET-only, manual dispatch,
+      read-only PAT (GHORG_AUDIT_TOKEN secret).
+    GitHub Actions sets CI=true automatically; no env: blocks needed.
+
+    CI scripts (ci/):
+    - install-helper-scripts.sh, install-genmkfile.sh: install upstream
+      deps before mock + live runs.
+    - live-probe-unauth.sh: smoke probe via the unauth rate-limit bucket.
+    - test-github-org-tools.sh: orchestrate mock tests under tests/.
+    - tests/test_*.sh: clone, fork, dm-audit, dm-dryrun, rate-limit-retry,
+      shellcheck-clean, validate-name-rejects-attacks, plus
+      include-private-user.
+
+    Codex PR #5 keepers: parser guards, ghorg_validate_name on CLI-derived
+    owners, --jobs bounds, token format check, is_whole_number from
+    strings.bsh. Codex paranoia (HELPER_SCRIPTS_REF SHA pinning,
+    SECURITY_REVIEW.md, 5 paranoia tests) deliberately not adopted; the
+    stat-mock-via-shell-function technique is now codified in
+    agents/security.md as something we don't carry.
+
+    Agents docs (agents/):
+    - bash-style-guide.md (canonical home for the org-wide style guide).
+    - security.md: introduction + two threat models + comparison table +
+      conclusion (CI/maintenance tooling vs derivative-maker production
+      code; the production-code threat model lives in derivative-maker).
+    - github-org-tools.md: tool-specific specifics (ghorg_validate_name,
+      ghorg_safe_print, GHORG_MAX_*, audit checklist).
+    - AGENTS.md: short index pointing into agents/.
+
+    Style sweep (existing files): braced ${var} throughout, printf
+    '%s\n' "..." style, local var1 var2 var3 at function top with blank
+    line after, split case arms with ;; on its own line, safe-rm over
+    rm, standalone trap functions, true "INFO: ..." debug-string null
+    ops, jq/sed/tr -- end-of-options, single-quote-around-vars in error
+    messages, log/die replaces ad-hoc printf '...' >&2; exit N, has from
+    helper-scripts replaces command -v X >/dev/null 2>&1, # shellcheck
+    source=/usr/libexec/helper-scripts/<file> over /dev/null. Trimmed
+    AI-tell suffixes from error messages (; refusing X, ; aborting,
+    parenthetical reasoning).
+
+    dm-packaging-helper-script: pkg_claude_md_pointer_do auto-generates
+    a minimal CLAUDE.md -> AGENTS.md redirect when packaged repos
+    already have an AGENTS.md.
+
+    github-org-set-fork-approval deleted - dm-github-policy --audit /
+    --apply / --dry-run covers every use case.
+
+    https://claude.ai/code/session_01U5dqsVj1msLQMiCemkuddP
+
+commit 33e548b7c1665300a3fd2263d5cf8dded78f32a4
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Fri May 1 11:15:40 2026 +0000
+
+    bumped changelog version
+
 commit 48f465b480e289a44dc5287f9f1d1efa72602605
 Merge: 2f61fc0 c069ca4
 Author: Patrick Schleizer <adrelanos@whonix.org>
