@@ -28,7 +28,12 @@ readonly MIRROR='org-ai-assisted'
 ## Source orgs to mirror from. Production list:
 readonly SOURCE_ORGS=( 'Kicksecure' 'Whonix' )
 
+## --include-forks: Kicksecure has ~13 repos that are forks of
+## upstream projects (grml-debootstrap, tirdad, etc.). github-org-fork
+## defaults to skipping forks; add the flag here so the org-ai-assisted
+## mirror covers the full Kicksecure surface, not just non-forks.
 readonly POLICY_FLAGS=(
+   --include-forks
    --disable-issues
    --disable-wiki
    --disable-projects
@@ -62,14 +67,25 @@ github-org-fork can create forks under it.
 EOF
 }
 
-## Intercept --help / -h up front so 'dm-fork-sync --help' prints
-## this wrapper's usage instead of running github-org-fork --help
-## once per source org.
+## Intercept --help / -h and --debug up front. --debug enables
+## 'set -x' here AND in the spawned github-org-fork (via the
+## flag passing the option as an argv element). Other args ('$@')
+## fall through to github-org-fork untouched, preserving any
+## --dry-run / --include-private / etc. the caller passed.
+debug_flag=()
+positional_args=()
 for arg in "$@"; do
    case "${arg}" in
       -h|--help)
          show_help
          exit 0
+         ;;
+      --debug)
+         set -x
+         debug_flag=( --debug )
+         ;;
+      *)
+         positional_args+=( "${arg}" )
          ;;
    esac
 done
@@ -80,5 +96,5 @@ has github-org-fork \
 for src in "${SOURCE_ORGS[@]}"; do
    printf '%s\n' ""
    printf '%s\n' "=== ${src} -> ${MIRROR} ==="
-   github-org-fork "${POLICY_FLAGS[@]}" "$@" -- "${src}" "${MIRROR}"
+   github-org-fork "${debug_flag[@]}" "${POLICY_FLAGS[@]}" "${positional_args[@]}" -- "${src}" "${MIRROR}"
 done

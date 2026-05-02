@@ -72,6 +72,12 @@ EOF
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --debug)
+      ## set -x here AND inside the lib (sourced above); 'set -x' is
+      ## a shell-local option, sourced lib functions inherit it.
+      set -x
+      shift
+      ;;
     --include-private)
       include_private=1
       shift
@@ -376,10 +382,18 @@ main() {
     [ -n "${target_set[${repo_name}]:-}" ] && to_configure+=( "${repo_name}" )
   done <<< "${source_repos}"
 
+  ## Best-effort: a single repo's check_collision or configure_one
+  ## failing must not abort the whole run. Common transient cause is
+  ## that GitHub fork creation is async; right after POST /forks
+  ## returns 202 the fork's Actions subsystem may not yet accept
+  ## PUT /repos/{owner}/{repo}/actions/permissions and that returns
+  ## 404/403. Without '|| true' here, errexit would skip every
+  ## subsequent repo and any further source orgs the caller queues.
+  ## A second run picks the failures up idempotently.
   if [ "${#to_configure[@]}" -gt 0 ]; then
     for repo_name in "${to_configure[@]}"; do
-      check_collision "${repo_name}"
-      configure_one "${repo_name}"
+      check_collision "${repo_name}" || true
+      configure_one "${repo_name}" || true
     done
   fi
 }
