@@ -47,7 +47,7 @@ show_dists() {
 }
 
 show_pool() {
-   if [ ! "$build_upload_noninteractive" = "true" ]; then
+   if [ ! "${build_upload_noninteractive:-}" = "true" ]; then
       true "${cyan}INFO ${BASH_SOURCE[0]}: Please press enter to continue showing pool.${reset}"
       read -r temp
    fi
@@ -65,7 +65,7 @@ show_pool() {
 }
 
 upload_real_ask() {
-   if [ ! "$build_upload_noninteractive" = "true" ]; then
+   if [ ! "${build_upload_noninteractive:-}" = "true" ]; then
       true "${cyan}INFO ${BASH_SOURCE[0]}: Please press enter to continue to uploading. $rsync_dry_run_maybe${reset}"
       read -r temp
    fi

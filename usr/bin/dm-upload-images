@@ -65,7 +65,7 @@ upload_files() {
    fi
    true "dist_server_with_upload_location_item_with_version_maybe: $dist_server_with_upload_location_item_with_version_maybe"
 
-   if [ ! "$build_upload_noninteractive" = "true" ]; then
+   if [ ! "${build_upload_noninteractive:-}" = "true" ]; then
       true "${cyan}INFO: Press any enter to continue.${reset}"
       read -r temp
    fi
@@ -108,7 +108,7 @@ upload_files() {
 
       if [ "$rsync_exit_code" = "0" ]; then
          if [ "$rsync_dry_run_maybe" = "--dry-run" ]; then
-            if [ ! "$build_upload_noninteractive" = "true" ]; then
+            if [ ! "${build_upload_noninteractive:-}" = "true" ]; then
                true "${cyan}INFO: Press any enter to continue.${reset}"
                read -r temp
             fi

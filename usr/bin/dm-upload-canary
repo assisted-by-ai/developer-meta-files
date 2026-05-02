@@ -26,7 +26,7 @@ if [ "$(id -u)" = "0" ]; then
    exit 1
 fi
 
-if [ ! "$build_upload_noninteractive" = "true" ]; then
+if [ ! "${build_upload_noninteractive:-}" = "true" ]; then
    true "${cyan}INFO ${BASH_SOURCE[0]}: Please press enter to continue canary github.${reset}"
    read -r temp
 fi
@@ -41,7 +41,7 @@ popd
 ## XXX: hardcoded project domain names
 for upload_location in root@whonix.org root@kicksecure.com ; do
 
-   if [ ! "$build_upload_noninteractive" = "true" ]; then
+   if [ ! "${build_upload_noninteractive:-}" = "true" ]; then
       true "${cyan}INFO ${BASH_SOURCE[0]}: Please press enter to continue canary --dry-run.${reset}"
       read -r temp
    fi
@@ -59,7 +59,7 @@ for upload_location in root@whonix.org root@kicksecure.com ; do
       "$binary_build_folder_dist/canary/canary.txt.embed.sig" \
       "${upload_location}:/var/rsync/developer-meta-files/canary"
 
-   if [ ! "$build_upload_noninteractive" = "true" ]; then
+   if [ ! "${build_upload_noninteractive:-}" = "true" ]; then
       true "${cyan}INFO ${BASH_SOURCE[0]}: Please press enter to continue canary.${reset}"
       read -r temp
    fi
