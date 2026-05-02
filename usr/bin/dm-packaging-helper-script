@@ -1754,6 +1754,13 @@ pkg_debian_control_open() {
 }
 
 ## Finds all Bash scripts in all repos and syntax-checks them.
+##
+## '\A#!/bin/bash$' anchors at start-of-file, so the shebang must be
+## on line 1. Plain '#!/bin/bash$' matches the pattern anywhere in
+## the file and false-positives on markdown code blocks (e.g.
+## agents/bash-style-guide.md shows '#!/bin/bash' as an example).
+## -P enables PCRE (gives us \A); -z treats each file as one record
+## so \A means "start of file", not "start of line".
 pkg_bash_sanity_test() {
    local grep_opts
 
@@ -1762,14 +1769,16 @@ pkg_bash_sanity_test() {
       '--exclude-dir=auto-generated-man-pages'
       '--exclude-dir=man'
       '--recursive'
-      '-l'
+      '--files-with-matches'
+      '--perl-regexp'
+      '--null-data'
    )
 
-   if ! grep "${grep_opts[@]}" --quiet '#!/bin/bash$' ; then
+   if ! grep "${grep_opts[@]}" --quiet '\A#!/bin/bash$' ; then
       return 0
    fi
 
-   grep "${grep_opts[@]}" '#!/bin/bash$' | xargs -n 1 bash -n --
+   grep "${grep_opts[@]}" '\A#!/bin/bash$' | xargs -n 1 bash -n --
 
    true
 }
