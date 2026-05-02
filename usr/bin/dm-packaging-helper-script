@@ -1778,7 +1778,7 @@ pkg_bash_sanity_test() {
       return 0
    fi
 
-   grep "${grep_opts[@]}" '\A#!/bin/bash$' | xargs -n 1 bash -n --
+   grep "${grep_opts[@]}" '\A#!/bin/bash$' | xargs --max-args=1 bash -n --
 
    true
 }
