@@ -1,3 +1,79 @@
+commit 09bef9384a3fd238b43be7472b3cbc360c57dd4b
+Merge: b86ec53 78a6f6c
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Sat May 2 15:00:26 2026 -0400
+
+    Merge remote-tracking branch 'assisted-by-ai/claude/dm-fork-sync-fixes-Pq3vH'
+
+commit 78a6f6cdec2efba638da3faf5c53ea3d32f89715
+Author: Claude <noreply@anthropic.com>
+Date:   Sat May 2 18:54:08 2026 +0000
+
+    dm-fork-sync: --include-forks in POLICY_FLAGS
+
+    Kicksecure has ~13 repos that are forks of upstream projects
+    (grml-debootstrap, tirdad, bindp, calamares-settings-debian,
+    grub-live, lxqt-wayland-session, mediawiki-shell, privleap,
+    ro-mode-init, sandbox-app-launcher, sysmaint-panel, tor-ctrl,
+    qubes-template-whonix). github-org-fork defaults to skipping forks
+    (GET /orgs/{org}/repos with .fork == false filter), which left
+    those out of the org-ai-assisted mirror.
+
+    Add --include-forks to POLICY_FLAGS so the mirror covers the full
+    Kicksecure surface. The new mirror entries become second-level
+    forks (parent = Kicksecure's fork, grandparent = the original
+    upstream).
+
+    https://claude.ai/code/session_01U5dqsVj1msLQMiCemkuddP
+
+commit 4acea3ec3ca5ba268ba688c9f2d77f378646fa46
+Author: Claude <noreply@anthropic.com>
+Date:   Sat May 2 18:47:30 2026 +0000
+
+    github-org-fork / dm-fork-sync: best-effort configure, --debug, token-test
+
+    Three independent fixes/additions for dm-fork-sync ergonomics:
+
+    1. github-org-fork main(): make the post-fork configure loop best-
+       effort. Previously a single check_collision or configure_one
+       failure (return 1) tripped errexit and aborted the whole run -
+       killing every subsequent repo's configure AND every subsequent
+       source org the caller had queued. The most common transient
+       cause is async fork creation: GitHub's POST /forks returns 202
+       before the new repo's Actions subsystem accepts
+       PUT /repos/{owner}/{repo}/actions/permissions, so the first
+       configure pass on a fresh fork can 404/403. With '|| true' in
+       the loop, a re-run picks the failures up idempotently. Brief
+       comment explains the rationale inline.
+
+    2. --debug flag (passes through dm-fork-sync to github-org-fork):
+       sets 'set -x' in both. Previously only 'bash -x dm-fork-sync'
+       traced the wrapper; the spawned github-org-fork ran without
+       tracing, hiding most of the interesting work. Now:
+         dm-fork-sync --debug
+       propagates the flag to every github-org-fork invocation.
+       github-org-fork itself also accepts --debug standalone.
+
+    3. dm-github-token-test: trivial helper that calls /user and
+       /rate_limit and prints login + remaining quota. Useful as a
+       pre-flight before dm-fork-sync / dm-github-policy --apply.
+       Fails closed with a clear error when the token is missing /
+       invalid / over quota.
+
+    https://claude.ai/code/session_01U5dqsVj1msLQMiCemkuddP
+
+commit b86ec5372e45e8da7d2e25558908c94bc957c95f
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Sat May 2 07:37:34 2026 -0400
+
+    .
+
+commit 6a88faedaa77d5fcb4c27c618c0b5b604a139b7c
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Sat May 2 08:47:24 2026 +0000
+
+    bumped changelog version
+
 commit 66bead41eb752d9dde651cbeef8b64c6dd007408
 Author: Patrick Schleizer <adrelanos@whonix.org>
 Date:   Sat May 2 04:46:58 2026 -0400
