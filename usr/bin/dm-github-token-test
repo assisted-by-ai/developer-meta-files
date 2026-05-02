@@ -1,0 +1,71 @@
+#!/bin/bash
+
+## Copyright (C) 2026 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+## AI-Assisted
+
+## Smoke-test the configured GitHub token before running
+## dm-fork-sync / dm-github-policy. Prints the authenticated user
+## login and the current REST API rate-limit budget, or fails with a
+## clear error if the token is missing / invalid / over quota.
+##
+## Usage:
+##   GITHUB_TOKEN='ghp_...' dm-github-token-test
+## or, with a token file at ~/.config/github-token (chmod 600):
+##   dm-github-token-test
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+
+# shellcheck source=/usr/libexec/helper-scripts/log_run_die.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/log_run_die.sh
+# shellcheck source=/usr/libexec/helper-scripts/has.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
+# shellcheck source=../libexec/developer-meta-files/github-org-lib.bsh
+source /usr/libexec/developer-meta-files/github-org-lib.bsh
+
+has curl || die 1 "'curl' not on PATH"
+has jq   || die 1 "'jq' not on PATH"
+
+token="$(ghorg_token 2>/dev/null)" \
+  || die 1 'no GitHub token configured (env GITHUB_TOKEN or ~/.config/github-token)'
+
+## /user identifies the auth principal; should match an Owner of any
+## org the caller plans to mutate.
+user_json="$(curl --silent --show-error --fail --location \
+   --max-time 10 \
+   --header 'Accept: application/vnd.github+json' \
+   --header "X-GitHub-Api-Version: ${GHORG_API_VERSION}" \
+   --header "Authorization: Bearer ${token}" \
+   'https://api.github.com/user')" \
+  || die 1 'token rejected by /user (HTTP error)'
+
+login="$(printf '%s' "${user_json}" | jq -r -- '.login')"
+[ -n "${login}" ] && [ "${login}" != 'null' ] \
+  || die 1 'response missing .login (token possibly invalid)'
+
+## /rate_limit shows budget across resources. .resources.core is the
+## main bucket dm-fork-sync / dm-github-policy consume.
+rl_json="$(curl --silent --show-error --fail \
+   --max-time 10 \
+   --header 'Accept: application/vnd.github+json' \
+   --header "X-GitHub-Api-Version: ${GHORG_API_VERSION}" \
+   --header "Authorization: Bearer ${token}" \
+   'https://api.github.com/rate_limit')" \
+  || die 1 'rate_limit endpoint failed'
+
+remaining="$(printf '%s' "${rl_json}" | jq -r -- '.resources.core.remaining')"
+limit="$(printf '%s' "${rl_json}" | jq -r -- '.resources.core.limit')"
+reset_epoch="$(printf '%s' "${rl_json}" | jq -r -- '.resources.core.reset')"
+
+printf '%s\n' "login: ${login}"
+printf '%s\n' "rate-limit core: ${remaining}/${limit} (resets at $(date -u -d "@${reset_epoch}" '+%Y-%m-%dT%H:%M:%SZ'))"
+
+if [ "${remaining}" -lt 100 ]; then
+   log warn "rate-limit core remaining is low (${remaining}/${limit}); consider waiting until reset"
+fi
