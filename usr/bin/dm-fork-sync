@@ -28,7 +28,12 @@ readonly MIRROR='org-ai-assisted'
 ## Source orgs to mirror from. Production list:
 readonly SOURCE_ORGS=( 'Kicksecure' 'Whonix' )
 
+## --include-forks: Kicksecure has ~13 repos that are forks of
+## upstream projects (grml-debootstrap, tirdad, etc.). github-org-fork
+## defaults to skipping forks; add the flag here so the org-ai-assisted
+## mirror covers the full Kicksecure surface, not just non-forks.
 readonly POLICY_FLAGS=(
+   --include-forks
    --disable-issues
    --disable-wiki
    --disable-projects
