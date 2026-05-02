@@ -1762,14 +1762,20 @@ pkg_bash_sanity_test() {
       '--exclude-dir=auto-generated-man-pages'
       '--exclude-dir=man'
       '--recursive'
-      '-l'
+      '--fixed-strings'
+      '--max-count=1'
+      '--files-with-matches'
+      '--binary-files=without-match'
+      '--exclude=*.md'
+      '--exclude=*.pas'
+      '--exclude=*.upstream'
    )
 
-   if ! grep "${grep_opts[@]}" --quiet '#!/bin/bash$' ; then
+   if ! grep "${grep_opts[@]}" --quiet -- '#!/bin/bash' ; then
       return 0
    fi
 
-   grep "${grep_opts[@]}" '#!/bin/bash$' | xargs -n 1 bash -n --
+   grep "${grep_opts[@]}" -- '#!/bin/bash' | xargs -n 1 bash -n --
 
    true
 }
@@ -2364,10 +2370,10 @@ run_batch_command() {
 
    (( batch_run_counter++ )) || true
    true "${FUNCNAME[0]}: batch_current_package_path: ${batch_current_package_path} | batch_run_counter: ${batch_run_counter}"
-   true "${cyan}INFO: ${FUNCNAME[0]}: batch_current_package_path: ${batch_current_package_path}"
-   true "${cyan}INFO: ${FUNCNAME[0]}: batch_current_package_reponame: ${batch_current_package_reponame}${reset}"
    true "${cyan}INFO: ${FUNCNAME[0]}: batch_current_project_name: ${batch_current_project_name}${reset}"
-   true "${cyan}INFO: ${FUNCNAME[0]}: batch_current_package_changelog: ${batch_current_package_changelog}${reset}"
+   true "${cyan}INFO: ${FUNCNAME[0]}: batch_current_package_reponame: ${batch_current_package_reponame}${reset}"
+   true "${cyan}INFO: ${FUNCNAME[0]}: batch_current_package_path: ${batch_current_package_path}${reset}"
+   true "INFO: ${FUNCNAME[0]}: batch_current_package_changelog: ${batch_current_package_changelog}"
 
    set_batch_current_package_remote_list
 
