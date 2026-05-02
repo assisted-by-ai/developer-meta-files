@@ -6,7 +6,7 @@
 ## AI-Assisted
 
 ## Smoke-test the configured GitHub token before running
-## dm-fork-sync / dm-github-policy. Prints the authenticated user
+## dm-github-fork-sync / dm-github-policy. Prints the authenticated user
 ## login and the current REST API rate-limit budget, or fails with a
 ## clear error if the token is missing / invalid / over quota.
 ##
@@ -48,7 +48,7 @@ login_raw="$(printf '%s' "${user_body}" | jq -r -- '.login')"
 login="$(ghorg_safe_print "${GHORG_MAX_USER_LOGIN_LEN}" "${login_raw}")"
 
 ## /rate_limit shows budget across resources. .resources.core is the
-## main bucket dm-fork-sync / dm-github-policy consume.
+## main bucket dm-github-fork-sync / dm-github-policy consume.
 rl_result="$(ghorg_api GET '/rate_limit')" || die 1 'rate_limit endpoint failed'
 
 rl_status="$(ghorg_status_of "${rl_result}")"

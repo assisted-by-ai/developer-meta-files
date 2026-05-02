@@ -5,7 +5,7 @@
 
 ## AI-Assisted
 
-## Mock-API test: every github-org-* / dm-github-policy / dm-fork-sync
+## Mock-API test: every github-org-* / dm-github-*
 ## tool, the shared github-org-lib, and every ci/tests/*.sh script
 ## must pass shellcheck cleanly. The project-wide .shellcheckrc at
 ## the repo root applies; this test catches regressions before they
@@ -42,7 +42,7 @@ files=(
    "${REPO_ROOT}/usr/bin/github-org-fork"
    "${REPO_ROOT}/usr/bin/github-org-push"
    "${REPO_ROOT}/usr/bin/dm-github-policy"
-   "${REPO_ROOT}/usr/bin/dm-fork-sync"
+   "${REPO_ROOT}/usr/bin/dm-github-fork-sync"
    "${REPO_ROOT}/usr/libexec/developer-meta-files/github-org-lib.bsh"
    "${REPO_ROOT}/ci/test-github-org-tools.sh"
    "${REPO_ROOT}/ci/install-genmkfile.sh"

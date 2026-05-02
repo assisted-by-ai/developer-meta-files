@@ -1,4 +1,4 @@
-# github-org-* / dm-github-policy / dm-fork-sync security (AI-Assisted)
+# github-org-* / dm-* security (AI-Assisted)
 
 What this surface specifically defends against and what it
 deliberately trusts. General threat-modeling principles in

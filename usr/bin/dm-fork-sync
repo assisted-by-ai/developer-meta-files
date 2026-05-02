@@ -7,7 +7,7 @@
 
 ## Project-policy wrapper around `github-org-fork`. Mirrors Kicksecure
 ## and Whonix into the org-ai-assisted GitHub org. Run
-## `dm-fork-sync --help` for the policy flags applied.
+## `dm-github-fork-sync --help` for the policy flags applied.
 
 set -o errexit
 set -o nounset
@@ -54,9 +54,9 @@ with the settings the project requires:
   - in-workflow GITHUB_TOKEN constrained to read-only by default
 
 Usage:
-  dm-fork-sync             ## sync all source orgs into the mirror
-  dm-fork-sync --dry-run   ## report planned actions only
-  dm-fork-sync --help
+  dm-github-fork-sync             ## sync all source orgs into the mirror
+  dm-github-fork-sync --dry-run   ## report planned actions only
+  dm-github-fork-sync --help
 
 All extra flags are forwarded to github-org-fork, so --dry-run, -v,
 --include / --exclude REGEX, etc. all work.
