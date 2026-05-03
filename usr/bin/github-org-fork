@@ -350,10 +350,26 @@ sync_one() {
     log warn "sync-branches: '${target_owner}/${repo}' has no default branch"
     return 0
   fi
-  ## Default branch is API-derived; passes into request body and into
-  ## display via printf. Validate as a name before either sink.
-  ghorg_validate_name "${default_branch}" repo \
-    || { log warn "sync-branches: '${target_owner}/${repo}' default branch invalid"; return 0; }
+  ## Default branch is API-derived; passes into the request body
+  ## (jq escapes safely) and into display via log/printf (sanitized
+  ## via ghorg_safe_print before output). Defense-in-depth allowlist:
+  ## branches can legitimately contain '/' (e.g., 'release/2026'), so
+  ## ghorg_validate_name (repo-name allowlist, no slash) is too strict
+  ## and would mis-reject any repo whose default branch is hierarchical.
+  ## Accept the git-ref-name character set ([A-Za-z0-9._/-]) with a
+  ## length cap and the same arg-injection / '..' guards as
+  ## ghorg_validate_name.
+  case "${default_branch}" in
+    '' | '-'* | *..* )
+      log warn "sync-branches: '${target_owner}/${repo}' default branch invalid: '$(ghorg_safe_print 64 "${default_branch}")'"
+      return 0
+      ;;
+  esac
+  if ! [[ "${default_branch}" =~ ^[A-Za-z0-9._/-]+$ ]] \
+     || [ "${#default_branch}" -gt 256 ]; then
+    log warn "sync-branches: '${target_owner}/${repo}' default branch invalid: '$(ghorg_safe_print 64 "${default_branch}")'"
+    return 0
+  fi
 
   body="$(jq -n --arg b "${default_branch}" -- '{branch: $b}')"
   result="$(ghorg_api POST \
