@@ -329,7 +329,7 @@ configure_one() {
 ## Most are 'master', some are 'main' or other names; do not hard-code.
 sync_one() {
   local repo result status info default_branch body safe_repo safe_branch
-  local merge_type merged_commits safe_merge_type
+  local merge_type merged_commits safe_merge_type safe_merged_commits
 
   repo="$1"
 
@@ -381,9 +381,14 @@ sync_one() {
     200)
       merge_type="$(ghorg_body_of "${result}" | jq -r -- '.merge_type')"
       merged_commits="$(ghorg_body_of "${result}" | jq -r -- '.merged_commits // 0')"
+      ## Both flow into a 'log notice' display sink; sanitize per the
+      ## "API-derived strings into printf" rule. merged_commits should
+      ## be numeric, but a hostile/replayed GHORG_API endpoint can
+      ## return arbitrary bytes and we still want safe display.
       safe_merge_type="$(ghorg_safe_print 32 "${merge_type}")"
+      safe_merged_commits="$(ghorg_safe_print 16 "${merged_commits}")"
       [ "${verbose}" = '1' ] && log notice \
-        "synced: ${target_owner}/${safe_repo}/${safe_branch} merge_type='${safe_merge_type}' commits=${merged_commits}"
+        "synced: ${target_owner}/${safe_repo}/${safe_branch} merge_type='${safe_merge_type}' commits='${safe_merged_commits}'"
       ;;
     409)
       log warn "sync-branches: '${target_owner}/${safe_repo}/${safe_branch}' diverged from upstream (HTTP 409)"
