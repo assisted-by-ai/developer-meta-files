@@ -30,6 +30,7 @@ disable_wiki=0
 disable_projects=0
 actions_state='leave'    ## enable | disable | leave
 workflow_perms='leave'   ## read | write | leave
+sync_branches=0
 dry_run=0
 verbose=0
 
@@ -59,6 +60,10 @@ Options:
   --workflow-perms {read|write|leave}
                        set default GITHUB_TOKEN permissions in target
                        workflows (default: leave)
+  --sync-branches      after fork-create + configure, fast-forward each
+                       target repo's default branch from upstream via
+                       POST /repos/{owner}/{repo}/merge-upstream. 409
+                       (diverged) and 422 (branch missing) become warns.
   --dry-run            report planned actions, do nothing
   -v, --verbose        print each API call's effect
   -h, --help           show this help and exit
@@ -135,6 +140,10 @@ while [ "$#" -gt 0 ]; do
           ;;
       esac
       shift 2
+      ;;
+    --sync-branches)
+      sync_branches=1
+      shift
       ;;
     --dry-run)
       dry_run=1
@@ -306,6 +315,72 @@ configure_one() {
   fi
 }
 
+## Fast-forward target_owner/repo's default branch from upstream via
+## POST /repos/{owner}/{repo}/merge-upstream. The merge-upstream
+## endpoint:
+##   200 - synced (or already up-to-date); .merge_type tells the form.
+##   409 - upstream and fork have diverged in a way merge-upstream
+##         cannot fast-forward (someone pushed to the mirror directly).
+##   422 - default branch missing on either side.
+## We accept 200 and downgrade 409/422 to warn so a single repo's
+## divergence does not abort the run.
+##
+## Default branch is looked up via /repos/{owner}/{repo}.default_branch.
+## Most are 'master', some are 'main' or other names; do not hard-code.
+sync_one() {
+  local repo result status info default_branch body safe_repo safe_branch
+  local merge_type merged_commits safe_merge_type
+
+  repo="$1"
+
+  if [ "${dry_run}" = '1' ]; then
+    log notice "DRY-RUN: sync-branches ${target_owner}/${repo}"
+    return 0
+  fi
+
+  ## Need the default branch name. Fetch the repo metadata once.
+  info="$(ghorg_api GET "/repos/${target_owner}/${repo}")" || return 1
+  status="$(ghorg_status_of "${info}")"
+  if [ "${status}" != '200' ]; then
+    log warn "sync-branches: lookup '${target_owner}/${repo}': HTTP '${status}'"
+    return 0
+  fi
+  default_branch="$(ghorg_body_of "${info}" | jq -r -- '.default_branch')"
+  if [ -z "${default_branch}" ] || [ "${default_branch}" = 'null' ]; then
+    log warn "sync-branches: '${target_owner}/${repo}' has no default branch"
+    return 0
+  fi
+  ## Default branch is API-derived; passes into request body and into
+  ## display via printf. Validate as a name before either sink.
+  ghorg_validate_name "${default_branch}" repo \
+    || { log warn "sync-branches: '${target_owner}/${repo}' default branch invalid"; return 0; }
+
+  body="$(jq -n --arg b "${default_branch}" -- '{branch: $b}')"
+  result="$(ghorg_api POST \
+    "/repos/${target_owner}/${repo}/merge-upstream" "${body}")" || return 1
+  status="$(ghorg_status_of "${result}")"
+  safe_repo="$(ghorg_safe_print "${GHORG_MAX_REPO_NAME_LEN}" "${repo}")"
+  safe_branch="$(ghorg_safe_print "${GHORG_MAX_REPO_NAME_LEN}" "${default_branch}")"
+  case "${status}" in
+    200)
+      merge_type="$(ghorg_body_of "${result}" | jq -r -- '.merge_type')"
+      merged_commits="$(ghorg_body_of "${result}" | jq -r -- '.merged_commits // 0')"
+      safe_merge_type="$(ghorg_safe_print 32 "${merge_type}")"
+      [ "${verbose}" = '1' ] && log notice \
+        "synced: ${target_owner}/${safe_repo}/${safe_branch} merge_type='${safe_merge_type}' commits=${merged_commits}"
+      ;;
+    409)
+      log warn "sync-branches: '${target_owner}/${safe_repo}/${safe_branch}' diverged from upstream (HTTP 409)"
+      ;;
+    422)
+      log warn "sync-branches: '${target_owner}/${safe_repo}/${safe_branch}' branch missing on upstream (HTTP 422)"
+      ;;
+    *)
+      log warn "sync-branches: '${target_owner}/${safe_repo}/${safe_branch}': HTTP '${status}'"
+      ;;
+  esac
+}
+
 ## Populates the associative array named in $1 with one key per
 ## newline-separated repo name in $2. Empty lines skipped.
 fork_main_build_repo_set() {
@@ -394,6 +469,13 @@ main() {
     for repo_name in "${to_configure[@]}"; do
       check_collision "${repo_name}" || true
       configure_one "${repo_name}" || true
+    done
+  fi
+
+  ## Branch sync (--sync-branches). Same best-effort guarantee.
+  if [ "${sync_branches}" = '1' ] && [ "${#to_configure[@]}" -gt 0 ]; then
+    for repo_name in "${to_configure[@]}"; do
+      sync_one "${repo_name}" || true
     done
   fi
 }
