@@ -194,6 +194,10 @@ combine_alt() {
   local -n list_ref="$1"
   local item out=''
   for item in "${list_ref[@]}"; do
+    ## Empty pattern is treated as "no filter at this slot". A wrapper
+    ## that forwards an optional regex with --exclude "${EXCLUDE_RE:-}"
+    ## should not silently match every repo via 'grep -v -E ()'.
+    [ -z "${item}" ] && continue
     if [ -z "${out}" ]; then
       out="(${item})"
     else
