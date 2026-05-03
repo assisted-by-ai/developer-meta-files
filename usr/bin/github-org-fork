@@ -23,6 +23,13 @@ source /usr/libexec/developer-meta-files/github-org-lib.bsh
 include_private=0
 include_archived=0
 include_forks=0
+## --include / --exclude can each be passed multiple times; OR-combine
+## the patterns so a wrapper-supplied filter (e.g. dm-github-fork-sync's
+## per-source SOURCE_EXCLUDE_RE) is not silently overridden by a
+## user-supplied --exclude on the same command line. Stored as arrays
+## during parsing; OR-combined into a single regex below.
+include_re_list=()
+exclude_re_list=()
 include_re=''
 exclude_re=''
 disable_issues=0
@@ -97,12 +104,12 @@ while [ "$#" -gt 0 ]; do
       ;;
     --include)
       [ "$#" -ge 2 ] || die 64 "missing value for --include"
-      include_re="$2"
+      include_re_list+=( "$2" )
       shift 2
       ;;
     --exclude)
       [ "$#" -ge 2 ] || die 64 "missing value for --exclude"
-      exclude_re="$2"
+      exclude_re_list+=( "$2" )
       shift 2
       ;;
     --disable-issues)
@@ -177,6 +184,26 @@ fi
 
 source_owner="$1"
 target_owner="$2"
+
+## OR-combine multi-flag --include / --exclude lists into single
+## regexes (extended) consumed by ghorg_filter_names below. Each
+## individual pattern wrapped in (...) so alternation between user-
+## supplied and wrapper-supplied filters cannot be unbalanced by
+## bare '|' inside one of them.
+combine_alt() {
+  local -n list_ref="$1"
+  local item out=''
+  for item in "${list_ref[@]}"; do
+    if [ -z "${out}" ]; then
+      out="(${item})"
+    else
+      out="${out}|(${item})"
+    fi
+  done
+  printf '%s' "${out}"
+}
+include_re="$(combine_alt include_re_list)"
+exclude_re="$(combine_alt exclude_re_list)"
 
 ghorg_require_deps
 ghorg_validate_name "${source_owner}" user
@@ -352,21 +379,17 @@ sync_one() {
   fi
   ## Default branch is API-derived; passes into the request body
   ## (jq escapes safely) and into display via log/printf (sanitized
-  ## via ghorg_safe_print before output). Defense-in-depth allowlist:
-  ## branches can legitimately contain '/' (e.g., 'release/2026'), so
-  ## ghorg_validate_name (repo-name allowlist, no slash) is too strict
-  ## and would mis-reject any repo whose default branch is hierarchical.
-  ## Accept the git-ref-name character set ([A-Za-z0-9._/-]) with a
-  ## length cap and the same arg-injection / '..' guards as
-  ## ghorg_validate_name.
-  case "${default_branch}" in
-    '' | '-'* | *..* )
-      log warn "sync-branches: '${target_owner}/${repo}' default branch invalid: '$(ghorg_safe_print 64 "${default_branch}")'"
-      return 0
-      ;;
-  esac
-  if ! [[ "${default_branch}" =~ ^[A-Za-z0-9._/-]+$ ]] \
-     || [ "${#default_branch}" -gt 256 ]; then
+  ## via ghorg_safe_print before output). The remaining validation
+  ## here is defense-in-depth.
+  ##
+  ## Use git's own ref-name validator instead of an inline allowlist.
+  ## Branch names can legitimately contain characters beyond a simple
+  ## class (e.g. '+' in tags-as-branches workflows), and any homegrown
+  ## regex tends to false-positive on edge cases. 'git check-ref-format
+  ## --branch -- "${default_branch}"' enforces the actual git ref-name
+  ## rules (no leading '-', no '..', no control chars, no doubled '/',
+  ## no trailing '.lock', etc).
+  if ! git check-ref-format --branch -- "${default_branch}" >/dev/null 2>&1; then
     log warn "sync-branches: '${target_owner}/${repo}' default branch invalid: '$(ghorg_safe_print 64 "${default_branch}")'"
     return 0
   fi
@@ -494,7 +517,11 @@ main() {
   fi
 
   ## Branch sync (--sync-branches). Same best-effort guarantee.
+  ## sync_one calls 'git check-ref-format --branch' to validate
+  ## API-derived default branch names; check git up-front so a missing
+  ## binary fails loudly instead of silently rejecting every repo.
   if [ "${sync_branches}" = '1' ] && [ "${#to_configure[@]}" -gt 0 ]; then
+    has git || die 1 "'git' not on PATH (required by --sync-branches)"
     for repo_name in "${to_configure[@]}"; do
       sync_one "${repo_name}" || true
     done
