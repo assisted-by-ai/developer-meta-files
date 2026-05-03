@@ -384,12 +384,18 @@ sync_one() {
   ##
   ## Use git's own ref-name validator instead of an inline allowlist.
   ## Branch names can legitimately contain characters beyond a simple
-  ## class (e.g. '+' in tags-as-branches workflows), and any homegrown
-  ## regex tends to false-positive on edge cases. 'git check-ref-format
-  ## --branch -- "${default_branch}"' enforces the actual git ref-name
-  ## rules (no leading '-', no '..', no control chars, no doubled '/',
-  ## no trailing '.lock', etc).
-  if ! git check-ref-format --branch -- "${default_branch}" >/dev/null 2>&1; then
+  ## class (e.g. '+'), and any homegrown regex tends to false-positive
+  ## on edge cases.
+  ##
+  ## 'git check-ref-format' does not support '--' as an end-of-options
+  ## separator on any of its forms (verified against git 2.43); both
+  ## '--branch -- <X>' and '-- <refname>' return usage error 129 even
+  ## for valid names. Validate as a full refname instead, prefixing
+  ## 'refs/heads/' ourselves. The prefix ensures the resulting argv
+  ## element never starts with '-', so the missing '--' end-of-options
+  ## doesn't create a shell-level arg-injection path from a hostile
+  ## API response.
+  if ! git check-ref-format "refs/heads/${default_branch}" >/dev/null 2>&1; then
     log warn "sync-branches: '${target_owner}/${repo}' default branch invalid: '$(ghorg_safe_print 64 "${default_branch}")'"
     return 0
   fi
@@ -517,9 +523,9 @@ main() {
   fi
 
   ## Branch sync (--sync-branches). Same best-effort guarantee.
-  ## sync_one calls 'git check-ref-format --branch' to validate
-  ## API-derived default branch names; check git up-front so a missing
-  ## binary fails loudly instead of silently rejecting every repo.
+  ## sync_one calls 'git check-ref-format' to validate API-derived
+  ## default branch names; check git up-front so a missing binary
+  ## fails loudly instead of silently rejecting every repo.
   if [ "${sync_branches}" = '1' ] && [ "${#to_configure[@]}" -gt 0 ]; then
     has git || die 1 "'git' not on PATH (required by --sync-branches)"
     for repo_name in "${to_configure[@]}"; do
