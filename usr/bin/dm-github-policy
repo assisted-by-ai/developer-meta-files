@@ -33,7 +33,6 @@ has github-org-fork \
 ## dry-run / apply against the mirror does not silently fail mid-loop.
 # readonly ORGS=( 'Kicksecure' 'Whonix' 'org-ai-assisted' )
 readonly ORGS=( 'org-ai-assisted' )
-readonly POLICY_JOBS=4
 readonly RULESET_NAME_BRANCH='dm-github-policy default-branch protection'
 readonly RULESET_NAME_TAG='dm-github-policy tag protection'
 readonly CODE_SEC_CONFIG_NAME='dm-github-policy code security'
@@ -174,14 +173,13 @@ policy_parse_mode_args "$@"
 
 ghorg_require_deps
 
-## main() creates a tempfile and exports its path as POLICY_WARN_FILE
-## so the lib's policy_api_call appends one byte to it on every warn
-## (across the org-level apply path AND the per-repo backgrounded
-## loop). main() then tests '[ -s "${POLICY_WARN_FILE}" ]' to learn
-## "did at least one warn happen anywhere", which is the only signal
-## a CI / cron caller needs - exit non-zero on warn, zero otherwise.
-## No per-status counters, no summary printout: the operator can read
-## the log lines above to see what specifically went wrong.
+## Single bit of bookkeeping: the lib's policy_api_call and the
+## ruleset-upsert helper set this to 1 on every warn path (caller-
+## scope mutation via bash dynamic scoping). main() inits it to 0
+## and tests it at exit. The operator already sees each warn line
+## in the log; CI / cron callers only need the at-least-one bit.
+## No per-status counters or summary printout.
+policy_warn_seen=0
 
 ## Idempotent code-security-configuration upsert + attach + default.
 ## Replaces the deprecated PATCH /orgs/{org} security-defaults fields
@@ -225,13 +223,13 @@ apply_code_security_config() {
 
    ## Find existing configuration by name.
    list_result="$(ghorg_api GET "/orgs/${org}/code-security/configurations?per_page=100")" \
-      || { _policy_mark_warn; return 1; }
+      || { policy_warn_seen=1; return 1; }
    list_status="$(ghorg_status_of "${list_result}")"
    if [ "${list_status}" != '200' ]; then
       list_body="$(ghorg_body_of "${list_result}")"
       list_safe_body="$(ghorg_safe_print 512 "${list_body}")"
       log warn "${org}: list code-security configurations [${list_status}]: ${list_safe_body}"
-      _policy_mark_warn
+      policy_warn_seen=1
       return 1
    fi
    existing_id="$(ghorg_body_of "${list_result}" \
@@ -245,7 +243,7 @@ apply_code_security_config() {
          [ "${#existing_id}" -gt "${GHORG_MAX_ID_LEN}" ]; then
          safe_id="$(ghorg_safe_print 32 "${existing_id}")"
          log warn "'${org}': code-security config id '${safe_id}' not a valid numeric id"
-         _policy_mark_warn
+         policy_warn_seen=1
          return 1
       fi
       policy_api_call "${org}: update code-security configuration id=${existing_id}" \
@@ -255,7 +253,7 @@ apply_code_security_config() {
       ## POST returns the new config object including its id; we need
       ## the id for the attach + default calls.
       create_result="$(ghorg_api POST "/orgs/${org}/code-security/configurations" "${config_body}")" \
-         || { _policy_mark_warn; return 1; }
+         || { policy_warn_seen=1; return 1; }
       create_status="$(ghorg_status_of "${create_result}")"
       case "${create_status}" in
          200|201)
@@ -266,7 +264,7 @@ apply_code_security_config() {
             create_body="$(ghorg_body_of "${create_result}")"
             create_safe_body="$(ghorg_safe_print 512 "${create_body}")"
             log warn "${org}: create code-security configuration [${create_status}]: ${create_safe_body}"
-            _policy_mark_warn
+            policy_warn_seen=1
             return 1
             ;;
       esac
@@ -658,28 +656,14 @@ apply_repo_policy() {
       PATCH "/repos/${owner}/${repo}" "${patch}" || true
 }
 
-dm_github_policy_cleanup_warn_file() {
-   # shellcheck disable=SC2317  ## invoked indirectly via trap
-   safe-rm --force -- "${POLICY_WARN_FILE}"
-}
-
 main() {
-   local org repos active repo
+   local org repos repo
    if [ "${mode}" = 'audit' ]; then
       for org in "${ORGS[@]}"; do
          audit_org_state "${org}"
       done
       return 0
    fi
-
-   ## Set up the warn-flag tempfile before any policy_api_call runs.
-   ## Backgrounded children from the per-repo loop inherit the env
-   ## var so their warn appends land in the same file. Single-byte
-   ## appends are atomic across concurrent writers (see
-   ## github-policy-lib.bsh _policy_mark_warn).
-   POLICY_WARN_FILE="$(mktemp)"
-   export POLICY_WARN_FILE
-   trap dm_github_policy_cleanup_warn_file EXIT
 
    for org in "${ORGS[@]}"; do
       apply_org_policy "${org}"
@@ -695,28 +679,19 @@ main() {
          continue
       fi
 
-      active=0
+      ## Sequential per-repo apply: one PATCH per repo for a small
+      ## org (~12 repos) is fast enough not to need backgrounding,
+      ## and a sequential loop lets policy_warn_seen mutations from
+      ## the lib propagate back to this scope without a tempfile
+      ## or per-pid wait dance.
       while IFS= read -r repo; do
          [ -z "${repo}" ] && continue
-         apply_repo_policy "${org}" "${repo}" &
-         active=$(( active + 1 ))
-         if [ "${active}" -ge "${POLICY_JOBS}" ]; then
-            wait -n || true
-            active=$(( active - 1 ))
-         fi
+         apply_repo_policy "${org}" "${repo}"
       done <<< "${repos}"
-      wait
    done
 
-   ## Single bit of bookkeeping: did any warn happen anywhere? CI /
-   ## cron callers want a non-zero exit when something went wrong;
-   ## the operator reads the log lines above to see what specifically
-   ## failed. No per-status counters or summary printout - those add
-   ## noise without adding signal beyond what the log lines already
-   ## convey.
-   if [ -s "${POLICY_WARN_FILE}" ]; then
-      return 1
-   fi
+   [ "${policy_warn_seen}" -eq 1 ] && return 1
+   return 0
 }
 
 main

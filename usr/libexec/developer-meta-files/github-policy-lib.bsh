@@ -29,17 +29,23 @@
 ##                         call and returns 0 without contacting the
 ##                         API.
 ##
+## Caller-mutated globals (bash dynamic scoping):
+##
+##   ${policy_warn_seen}  - every warn path in this lib sets this to
+##                          '1'. Caller initializes it to '0' before
+##                          the apply loop and tests
+##                          '[ "${policy_warn_seen}" -eq 1 ]'
+##                          afterward to learn "did at least one warn
+##                          happen anywhere". Replaces a per-status
+##                          counting scheme - the operator already
+##                          sees each warn line in the log; CI / cron
+##                          callers only need the at-least-one bit.
+##                          The lib's writes happen in the same shell
+##                          as the loop, so sequential apply paths can
+##                          rely on the var directly.
+##
 ## Optional caller-set globals:
 ##
-##   ${POLICY_WARN_FILE}  - if non-empty, every warn path appends one
-##                          byte to this file. Caller is expected to
-##                          create it as a tempfile, export it before
-##                          spawning per-repo background jobs (atomic
-##                          single-byte appends are PIPE_BUF-safe), and
-##                          test '[ -s "${file}" ]' afterward to learn
-##                          "did at least one warn happen anywhere".
-##                          Replaces a per-status counting scheme:
-##                          callers do not need ok / dry / skip totals.
 ##   ${POLICY_QUIET_OK}   - if '1', the 'ok:' line is suppressed
 ##                          (apply runs without --verbose).
 
@@ -54,36 +60,49 @@
 ## API call wrapper
 ## ============================================================================
 
-## Dry-run-aware wrapper around ghorg_api. Logs at notice / warn level
-## and, on warn, touches ${POLICY_WARN_FILE} so the caller can detect
-## "at least one warn happened anywhere" without a counting scheme.
+## Dry-run-aware wrapper around ghorg_api. Logs at notice / warn
+## level and, on warn, sets the caller-scope ${policy_warn_seen} to
+## '1' (bash dynamic scoping) so the caller can detect "at least
+## one warn happened anywhere" without a counting scheme.
 ##
 ## Args:
 ##   $1 - human-readable label (printed after the prefix)
 ##   $2 - HTTP method (GET / POST / PUT / PATCH / DELETE)
 ##   $3 - URL path (relative to ${GHORG_API})
 ##   $4 - JSON body (optional; required by POST / PUT / PATCH)
+##   $5 - one extra HTTP status code to accept as success (optional;
+##        single code, not a list - the case statement below expands
+##        it as a literal glob pattern, so pipe-separated forms will
+##        not work). Use for endpoints where a non-2xx is a
+##        documented "nothing to do" response that should not raise
+##        a warn - e.g. the GitHub Pages DELETE endpoint returns 404
+##        when the repo has no Pages site, which is the normal
+##        idempotent-cleanup case.
 ##
 ## Returns: 0 on success (or dry-run), 1 on failure (after warn).
 policy_api_call() {
-   local label method path body result status response_body safe_body
+   local label method path body extra_ok result status response_body safe_body
 
    label="$1"
    method="$2"
    path="$3"
    body="${4:-}"
+   ## Default to a sentinel that no real HTTP code can equal so the
+   ## interpolated case pattern below ('200|201|202|204|${extra_ok}')
+   ## stays well-formed when no extras were passed.
+   extra_ok="${5:-__none__}"
 
    if [ "${dry_run}" = '1' ]; then
       log notice "DRY-RUN: ${label} -> ${method} ${path}"
       return 0
    fi
    result="$(ghorg_api "${method}" "${path}" "${body}")" || {
-      _policy_mark_warn
+      policy_warn_seen=1
       return 1
    }
    status="$(ghorg_status_of "${result}")"
    case "${status}" in
-      200|201|202|204)
+      200|201|202|204|"${extra_ok}")
          [ "${POLICY_QUIET_OK:-0}" = '1' ] \
             || log notice "ok: ${label} [${status}]"
          return 0
@@ -92,20 +111,10 @@ policy_api_call() {
          response_body="$(ghorg_body_of "${result}")"
          safe_body="$(ghorg_safe_print 512 "${response_body}")"
          log warn "'${label}' ['${status}']: ${safe_body}"
-         _policy_mark_warn
+         policy_warn_seen=1
          return 1
          ;;
    esac
-}
-
-## Append one byte to ${POLICY_WARN_FILE} so the caller can later
-## test '[ -s "${POLICY_WARN_FILE}" ]'. Single-byte appends are
-## atomic across concurrent backgrounded writers (PIPE_BUF >= 4096
-## on Linux), so the per-repo & background loop in dm-github-policy
-## does not need an extra mutex.
-_policy_mark_warn() {
-   [ -n "${POLICY_WARN_FILE:-}" ] || return 0
-   printf '%s' 'w' >> "${POLICY_WARN_FILE}"
 }
 
 ## ============================================================================
@@ -143,13 +152,13 @@ _policy_upsert_ruleset() {
    fi
 
    result="$(ghorg_api GET "${list_endpoint}?per_page=100")" || {
-      _policy_mark_warn
+      policy_warn_seen=1
       return 1
    }
    status="$(ghorg_status_of "${result}")"
    if [ "${status}" != '200' ]; then
       log warn "'${scope_label}': list rulesets returned '${status}'"
-      _policy_mark_warn
+      policy_warn_seen=1
       return 1
    fi
    existing_id="$(ghorg_body_of "${result}" \
@@ -163,7 +172,7 @@ _policy_upsert_ruleset() {
          || [ "${#existing_id}" -gt "${GHORG_MAX_ID_LEN}" ]; then
          safe_id="$(ghorg_safe_print 32 "${existing_id}")"
          log warn "'${scope_label}': ruleset id '${safe_id}' not a valid numeric id"
-         _policy_mark_warn
+         policy_warn_seen=1
          return 1
       fi
       policy_api_call "${scope_label}: update ruleset '${name}' id=${existing_id}" \

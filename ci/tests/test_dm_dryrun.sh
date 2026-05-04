@@ -31,10 +31,8 @@ export GHORG_MOCK_DIR="${FIXTURE_DIR}"
 
 ## Capture combined stdout+stderr; the lib routes everything through
 ## log_run_die.sh's stecho >&2.
-set +o errexit
-out="$(dm-github-policy --dry-run 2>&1)"
-rc=$?
-set -o errexit
+rc=0
+out="$(dm-github-policy --dry-run 2>&1)" || rc=$?
 
 fail=0
 
