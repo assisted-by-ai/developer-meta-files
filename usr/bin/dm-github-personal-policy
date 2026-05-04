@@ -57,6 +57,12 @@ Auth:
 EOF
 }
 
+## Collect positional args while continuing to parse flags after
+## them. Naive 'break' on first non-flag would let an operator type
+## 'dm-github-personal-policy <user> --dry-run' and have the
+## --dry-run silently ignored (mutating mode), which is exactly the
+## form documented in --help. Codex P1 review caught this.
+positional=()
 while [ "$#" -gt 0 ]; do
    case "$1" in
       --dry-run)
@@ -77,20 +83,25 @@ while [ "$#" -gt 0 ]; do
          ;;
       --)
          shift
-         break
+         while [ "$#" -gt 0 ]; do
+            positional+=( "$1" )
+            shift
+         done
          ;;
       -*)
          die 64 "unknown option: '$1'"
          ;;
       *)
-         break
+         positional+=( "$1" )
+         shift
          ;;
    esac
 done
 
-[ "$#" -ge 1 ] || { show_help >&2; die 64 'missing <username>'; }
+[ "${#positional[@]}" -eq 1 ] \
+   || { show_help >&2; die 64 "expected exactly 1 positional argument (<username>), got '${#positional[@]}'"; }
 
-target_user="$1"
+target_user="${positional[0]}"
 
 ghorg_require_deps
 ghorg_validate_name "${target_user}" user
