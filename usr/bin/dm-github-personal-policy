@@ -32,6 +32,7 @@ dry_run=0
 verbose=0
 mode=''
 mode_set=0
+positional=()
 target_user=''
 
 show_help() {
