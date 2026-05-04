@@ -1,21 +1,16 @@
 # Pre-push checklist (AI-Assisted)
 
-Skim before every push. Scope: any change to scripts under
-`usr/bin/`, `usr/libexec/developer-meta-files/`, `ci/`, or
-`agents/`. Project-specific rules in
-[github-org-tools.md](github-org-tools.md); general bash style in
-[bash-style-guide.md](bash-style-guide.md).
+Skim before every push.
+
+* Scope: any change to bash script, or `agents/`.
+* Project-specific rules in [agents/bash-style-guide.md](bash-style-guide.md).
 
 The list is grouped by phase. Skip items that don't apply to your
-diff; don't skip a phase. Each item cites the relevant rule (R-NNN
-for bash style, G-NNN for github-org-* / dm-* project rules) so
-you can grep for the underlying contract.
-
+diff; don't skip a phase. Each item cites the relevant rule.
 
 ## Static checks
 
-    [ ] bash -n on every changed *.sh / *.bsh / usr/bin/dm-* /
-        usr/bin/github-org-*
+    [ ] bash -n on every changed script
     [ ] shellcheck --external-sources (-x) on the same set
         (catches SC2317 unreachable-via-source for callbacks
         invoked indirectly across files)
@@ -23,7 +18,6 @@ you can grep for the underlying contract.
         (R-001 ASCII only)
     [ ] LC_ALL=C grep -P '[^\x00-\x7F]' on the commit message
         (R-001 ASCII only)
-
 
 ## Style spot-check (touched code only)
 
@@ -55,41 +49,7 @@ you can grep for the underlying contract.
     [ ] errexit not toggled around capture; use 'rc=0; out=$(cmd)
         || rc=$?' (R-011)
 
-
-## Project-rule spot-check (github-org-* / dm-* surface)
-
-    [ ] API-derived string into URL/file/git/curl arg ->
-        ghorg_validate_name (G-001) or numeric regex + length
-        cap (G-002)
-    [ ] API-derived string into printf/log -> ghorg_safe_print
-        (G-003)
-    [ ] No new <( ... ) process substitution feeding a read loop
-        without a documented reason (audit checklist in G-doc)
-    [ ] No new '&' background worker mutating shared state
-        without a tempfile (R-052, G-033)
-    [ ] New non-2xx success status (e.g., DELETE 404) passed as
-        the 5th arg to policy_api_call (G-034)
-
-
-## Mock-API test spot-check
-
-    [ ] Tests capture combined output via 2>&1 (G-041; bare
-        $(cmd) is empty after the printf->log conversion)
-    [ ] No '^prefix' anchored greps that target the log-line
-        prefix; use --fixed-strings substrings or exit-code
-        checks (G-042)
-    [ ] Prefer exit-code-based assertions to output-format-based
-        ones (G-043)
-    [ ] Reinstall ALL changed binaries before running the suite
-        locally - 'sudo cp' the full set or 'genmkfile install'.
-        A partial install masks regressions because the tool
-        still in /usr/bin is the unrefactored one.
-    [ ] Run the FULL ci/test-github-org-tools.sh suite, not just
-        the file matching the changed surface. Cross-file
-        contracts break otherwise.
-
-
-## External invocations (this is what bit me on rounds 2 and 3)
+## External invocations
 
     [ ] Any new external command / new flag -> run it locally
         first with the actual argv being constructed
@@ -105,7 +65,6 @@ you can grep for the underlying contract.
         expansion does NOT interpret '|' as alternation across
         an interpolated value (R-073).
 
-
 ## Refactor-aware re-check
 
     [ ] After ANY refactor that changes function scope, signature,
@@ -119,14 +78,9 @@ you can grep for the underlying contract.
         verify the new sequential code-path actually reaches
         every item (not just compiles).
 
-
 ## Commit
 
     [ ] Every new file from scratch has 'AI-Assisted' marker
         (R-002)
-    [ ] Commit message states the WHY in 1-3 sentences before
-        the diff narration
     [ ] No emoji, no smart quotes, no em dashes in commit message
         (R-001)
-    [ ] Cite relevant R-NNN / G-NNN rules in commit body when the
-        change applies or relaxes one

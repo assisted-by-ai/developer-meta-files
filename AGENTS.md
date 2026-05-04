@@ -1,12 +1,13 @@
 # AGENTS.md (AI-Assisted)
 
-Index of guidance for AI tools (Claude Code, Codex) and human reviewers.
-Read only the file relevant to your task; AGENTS.md itself stays short on
-purpose.
+* Index of guidance for AI tools (Claude Code, Codex).
+* Read only the file relevant to your task.
+* `AGENTS.md` itself stays short on purpose.
 
 | Topic | Where |
 | --- | --- |
 | Bash style (variables, printf, locals, traps, ...) | [`agents/bash-style-guide.md`](agents/bash-style-guide.md) |
+| pre-push checklist | [`agents/pre-push-checklist.md`](agents/pre-push-checklist.md) |
 | General threat model + trust boundaries | [`agents/security.md`](agents/security.md) |
 | github-org-* / dm-github-* specifics | [`agents/github-org-tools.md`](agents/github-org-tools.md) |
 

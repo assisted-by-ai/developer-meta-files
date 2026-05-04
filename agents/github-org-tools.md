@@ -15,7 +15,37 @@ Each rule: a one-line statement (the bold first sentence), an
 optional "Why" rationale, an optional code example. Skim the
 bold lines to audit a diff; read the Why for context.
 
+## Project-rule spot-check (github-org-* / dm-* surface)
 
+    [ ] API-derived string into URL/file/git/curl arg ->
+        ghorg_validate_name (G-001) or numeric regex + length
+        cap (G-002)
+    [ ] API-derived string into printf/log -> ghorg_safe_print
+        (G-003)
+    [ ] No new <( ... ) process substitution feeding a read loop
+        without a documented reason (audit checklist in G-doc)
+    [ ] No new '&' background worker mutating shared state
+        without a tempfile (R-052, G-033)
+    [ ] New non-2xx success status (e.g., DELETE 404) passed as
+        the 5th arg to policy_api_call (G-034)
+
+## Mock-API test spot-check
+
+    [ ] Tests capture combined output via 2>&1 (G-041; bare
+        $(cmd) is empty after the printf->log conversion)
+    [ ] No '^prefix' anchored greps that target the log-line
+        prefix; use --fixed-strings substrings or exit-code
+        checks (G-042)
+    [ ] Prefer exit-code-based assertions to output-format-based
+        ones (G-043)
+    [ ] Reinstall ALL changed binaries before running the suite
+        locally - 'sudo cp' the full set or 'genmkfile install'.
+        A partial install masks regressions because the tool
+        still in /usr/bin is the unrefactored one.
+    [ ] Run the FULL ci/test-github-org-tools.sh suite, not just
+        the file matching the changed surface. Cross-file
+        contracts break otherwise.
+        
 ## Threat boundary: GitHub REST API responses
 
 Every byte returned by `api.github.com` (or whatever `${GHORG_API}`
