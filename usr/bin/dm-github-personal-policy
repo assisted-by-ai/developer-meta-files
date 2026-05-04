@@ -72,17 +72,20 @@ positional=()
 while [ "$#" -gt 0 ]; do
    case "$1" in
       --apply)
+         [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --audit / --dry-run'
          mode='apply'
          mode_set=1
          shift
          ;;
       --dry-run)
+         [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --audit / --dry-run'
          mode='apply'
          dry_run=1
          mode_set=1
          shift
          ;;
       --audit)
+         [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --audit / --dry-run'
          mode='audit'
          mode_set=1
          shift

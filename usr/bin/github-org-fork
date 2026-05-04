@@ -52,10 +52,13 @@ ones are created. Optional flags also (re-)apply per-repo settings on
 the target side, so the script doubles as a drift corrector on every
 run.
 
-Usage:
-  github-org-fork [OPTIONS] <source-owner> <target-owner>
+Usage (one mode flag is required - no implicit default):
+  github-org-fork --apply   [OPTIONS] <source-owner> <target-owner>
+  github-org-fork --dry-run [OPTIONS] <source-owner> <target-owner>
 
 Options:
+  --apply              perform fork creation + per-repo configuration
+  --dry-run            report planned actions, do nothing
   --include-private    include private repos       (default: skip)
   --include-archived   include archived repos      (default: skip)
   --include-forks      include forks of other repos (default: skip)
@@ -74,7 +77,6 @@ Options:
                        target repo's default branch from upstream via
                        POST /repos/{owner}/{repo}/merge-upstream. 409
                        (diverged) and 422 (branch missing) become warns.
-  --dry-run            report planned actions, do nothing
   -v, --verbose        print each API call's effect
   -h, --help           show this help and exit
 
@@ -156,10 +158,12 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     --apply)
+      [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --dry-run'
       mode_set=1
       shift
       ;;
     --dry-run)
+      [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --dry-run'
       dry_run=1
       mode_set=1
       shift

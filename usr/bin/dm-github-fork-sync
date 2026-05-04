@@ -106,6 +106,7 @@ for arg in "$@"; do
          debug_flag=( --debug )
          ;;
       --apply|--dry-run)
+         [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --dry-run'
          mode_set=1
          positional_args+=( "${arg}" )
          ;;
