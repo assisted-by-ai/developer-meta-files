@@ -47,10 +47,14 @@ Usage (one mode flag is required - no implicit default):
   dm-github-personal-policy --help
 
 Settings applied per repo:
-  - Fork-PR contributor approval = all_external_contributors
-    (require approval before fork PRs run any workflow)
-  - Default workflow GITHUB_TOKEN permissions = read; cannot approve PRs
-  - Allowed Actions = selected (github-owned + verified creators)
+  - GitHub Actions DISABLED entirely (this account is a backup/
+    mirror; CI runs in the upstream orgs). Saves operator's free CI
+    minutes from any malicious-fork-PR or accidentally-triggered
+    workflow runs.
+  - Fork-PR contributor approval = all_external_contributors AND
+    default workflow GITHUB_TOKEN = read are still applied as
+    defense-in-depth: if Actions is later re-enabled in the UI,
+    those settings stay in force.
   - Wiki / Projects / Discussions = disabled (cut abuse vectors)
   - Secret scanning + push protection = enabled
   - Pages site = deleted if present (one-shot, not a permanent gate)
@@ -67,11 +71,13 @@ Deliberately NOT applied (commented out in source):
     here.
 
 Repos in scope:
-  - Public, non-archived, non-fork repos owned by <username>.
-    Forks are EXCLUDED by default; archived repos are read-only and
-    return HTTP 403 on PATCH/PUT regardless. Private repos are
-    excluded because external (untrusted) contributors cannot open PRs
-    against them.
+  - Public, non-archived repos owned by <username>, INCLUDING forks.
+    Forks own their own .github/workflows + ruleset settings, so a
+    malicious-fork-PR vector exists on them too - they need the same
+    lockdown. Archived repos are read-only and return HTTP 403 on
+    PATCH/PUT regardless, so they are excluded. Private repos are
+    excluded because external (untrusted) contributors cannot open
+    PRs against them.
 
 Auth:
   ${GITHUB_TOKEN} env var, or chmod-600 ~/.config/github-token.
@@ -79,57 +85,8 @@ Auth:
 EOF
 }
 
-## Collect positional args while continuing to parse flags after
-## them. Naive 'break' on first non-flag would let an operator type
-## 'dm-github-personal-policy <user> --dry-run' and have the
-## --dry-run silently ignored (mutating mode), which is exactly the
-## form documented in --help. Codex P1 review caught this.
 positional=()
-while [ "$#" -gt 0 ]; do
-   case "$1" in
-      --apply)
-         [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --audit / --dry-run'
-         mode='apply'
-         mode_set=1
-         shift
-         ;;
-      --dry-run)
-         [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --audit / --dry-run'
-         mode='apply'
-         dry_run=1
-         mode_set=1
-         shift
-         ;;
-      --audit)
-         [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --audit / --dry-run'
-         mode='audit'
-         mode_set=1
-         shift
-         ;;
-      -v|--verbose)
-         verbose=1
-         shift
-         ;;
-      -h|--help)
-         show_help
-         exit 0
-         ;;
-      --)
-         shift
-         while [ "$#" -gt 0 ]; do
-            positional+=( "$1" )
-            shift
-         done
-         ;;
-      -*)
-         die 64 "unknown option: '$1'"
-         ;;
-      *)
-         positional+=( "$1" )
-         shift
-         ;;
-   esac
-done
+policy_parse_mode_args "$@"
 
 [ "${#positional[@]}" -eq 1 ] \
    || { show_help >&2; die 64 "expected exactly 1 positional argument (<username>), got '${#positional[@]}'"; }
@@ -139,6 +96,10 @@ done
 
 target_user="${positional[0]}"
 
+## Policy tool needs the API base set; no git needed (it never
+## execs git). SC2119 fires because ghorg_require_deps takes "$@" -
+## here we deliberately pass nothing.
+# shellcheck disable=SC2119
 ghorg_require_deps
 ghorg_validate_name "${target_user}" user
 
@@ -166,18 +127,18 @@ apply_repo_policy() {
       "$(policy_workflow_perms_body)" \
       || true
 
-   ## 3. Allowed Actions = selected (github-owned + verified creators).
-   ##    Two-step: enable Actions + set allowed=selected, then set the
-   ##    list to github-owned + verified. Repo-level body schema differs
-   ##    from the org endpoint: 'enabled' (bool) instead of
-   ##    'enabled_repositories' (string).
-   policy_api_call "${target_user}/${repo}: actions enabled=true, allowed=selected" \
+   ## 3. Disable GitHub Actions entirely on the repo. The personal
+   ##    account is a backup/mirror; CI runs in the upstream orgs, so
+   ##    no workflow needs to fire here. Disabling is the strongest
+   ##    cut against malicious-fork-PR or accidentally-triggered
+   ##    runs and saves the operator's free CI minutes. Steps 1+2
+   ##    above stay as defense-in-depth in case Actions is later
+   ##    re-enabled in the UI. Repo-level body uses 'enabled' (bool);
+   ##    the allow-list endpoint is a no-op while enabled=false, so
+   ##    we skip the second PUT.
+   policy_api_call "${target_user}/${repo}: actions enabled=false (CI runs disabled)" \
       PUT "/repos/${target_user}/${repo}/actions/permissions" \
-      "$(jq -n -- '{ enabled: true, allowed_actions: "selected" }')" \
-      || true
-   policy_api_call "${target_user}/${repo}: selected-actions allow-list" \
-      PUT "/repos/${target_user}/${repo}/actions/permissions/selected-actions" \
-      "$(policy_actions_selected_allowlist_body)" \
+      "$(jq -n -- '{ enabled: false }')" \
       || true
 
    ## 4. Repo settings + secret-scanning + push-protection in one PATCH.
@@ -295,7 +256,13 @@ audit_one() {
    fi
 }
 
-repos="$(ghorg_list_repos "${target_user}" 0 0 0 \
+## inc_private=0, inc_archived=0, inc_forks=1: forks need the same
+## per-repo lockdown as non-fork repos (they have their own
+## .github/workflows + ruleset settings, so the malicious-fork-PR
+## vector exists on a fork too). Archived stays excluded - the API
+## returns 403 on PATCH/PUT of archived repos. Private stays excluded
+## - external contributors cannot open PRs against private repos.
+repos="$(ghorg_list_repos "${target_user}" 0 0 1 \
    | sort --unique)"
 
 if [ -z "${repos}" ]; then

@@ -17,8 +17,14 @@
 ##   GET_users_personal-test-user_repos       - one public non-archived
 ##                                              non-fork repo
 ##                                              (backup-mirror), one
-##                                              archived, one fork
-##                                              (both filtered out)
+##                                              archived (filtered out),
+##                                              and one fork
+##                                              (upstream-fork) which
+##                                              IS in scope - forks own
+##                                              their own .github/
+##                                              workflows + ruleset
+##                                              settings, so they get
+##                                              the same lockdown.
 
 set -o errexit
 set -o nounset
@@ -45,12 +51,16 @@ fail=0
 required=(
    'DRY-RUN: personal-test-user/backup-mirror: fork-PR approval=all_external_contributors'
    'DRY-RUN: personal-test-user/backup-mirror: workflow GITHUB_TOKEN read-only'
-   'DRY-RUN: personal-test-user/backup-mirror: actions enabled=true, allowed=selected'
-   'DRY-RUN: personal-test-user/backup-mirror: selected-actions allow-list'
+   'DRY-RUN: personal-test-user/backup-mirror: actions enabled=false (CI runs disabled)'
    'DRY-RUN: personal-test-user/backup-mirror: settings (wiki/projects/discussions off, secret-scan on)'
    'DRY-RUN: personal-test-user/backup-mirror: delete Pages site (if any)'
    'DRY-RUN: personal-test-user/backup-mirror: upsert ruleset dm-github-personal-policy default-branch protection'
    'DRY-RUN: personal-test-user/backup-mirror: upsert ruleset dm-github-personal-policy tag protection'
+   ## Fork repo: same lockdown applies. Picking one of the per-repo
+   ## settings to confirm the fork is reached at all - if it isn't,
+   ## the include_forks=1 wiring regressed.
+   'DRY-RUN: personal-test-user/upstream-fork: actions enabled=false (CI runs disabled)'
+   'DRY-RUN: personal-test-user/upstream-fork: upsert ruleset dm-github-personal-policy default-branch protection'
 )
 for needle in "${required[@]}"; do
    if ! grep --quiet --fixed-strings -- "${needle}" <<< "${out}"; then
@@ -69,15 +79,24 @@ if grep --quiet --extended-regexp -- '^ok:|^warn:' <<< "${out}"; then
    fail=1
 fi
 
-## Filter check: archived + fork repos must NOT be planned. The
-## fixture has 'old-archived' (archived) and 'upstream-fork' (fork)
-## alongside the one public non-archived non-fork repo.
-unexpected=( old-archived upstream-fork )
-for repo in "${unexpected[@]}"; do
-   if grep --quiet --fixed-strings -- "personal-test-user/${repo}" <<< "${out}"; then
-      printf '%s\n' "FAIL: ${repo} should be filtered out of dry-run" >&2
+## Filter check: actions enabled=true and the selected-actions
+## allow-list must NOT appear (we disabled Actions entirely instead).
+forbidden=(
+   'actions enabled=true'
+   'selected-actions allow-list'
+)
+for needle in "${forbidden[@]}"; do
+   if grep --quiet --fixed-strings -- "${needle}" <<< "${out}"; then
+      printf '%s\n' "FAIL: unexpected legacy fragment present: ${needle}" >&2
       fail=1
    fi
 done
+
+## Filter check: archived repos are still excluded by the API
+## listing. Forks ARE in scope now (see required[] above).
+if grep --quiet --fixed-strings -- 'personal-test-user/old-archived' <<< "${out}"; then
+   printf '%s\n' 'FAIL: archived repo should be filtered out of dry-run' >&2
+   fail=1
+fi
 
 exit "${fail}"

@@ -221,10 +221,13 @@ combine_alt() {
   done
   printf '%s' "${out}"
 }
+
 include_re="$(combine_alt include_re_list)"
 exclude_re="$(combine_alt exclude_re_list)"
 
-ghorg_require_deps
+## 'git' beyond the base API deps - --sync-branches resolves and
+## pushes branches locally.
+ghorg_require_deps git
 ghorg_validate_name "${source_owner}" user
 ghorg_validate_name "${target_owner}" user
 
@@ -490,7 +493,7 @@ main() {
     | sort --unique)"
 
   if [ -z "${source_repos}" ]; then
-    printf '%s\n' 'no source repos matched.' >&2
+    log notice 'no source repos matched.'
     return 0
   fi
 
@@ -504,7 +507,7 @@ main() {
   done <<< "${source_repos}"
 
   if [ "${#missing[@]}" -eq 0 ]; then
-    printf '%s\n' 'no new forks needed.'
+    log notice 'no new forks needed.'
   else
     for repo_name in "${missing[@]}"; do
       fork_one "${repo_name}"
