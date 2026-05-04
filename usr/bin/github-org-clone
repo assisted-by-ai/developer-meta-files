@@ -164,8 +164,7 @@ dest_dir="${2:-.}"
 [ "${mode_set}" -eq 1 ] \
    || { show_help >&2; die 64 'specify exactly one of --apply / --dry-run'; }
 
-## 'git' beyond the base API deps - this tool clones / fetches.
-ghorg_require_deps git
+ghorg_require_deps
 ghorg_validate_name "${source_org}" user
 is_whole_number "${jobs}" \
   && [ "${jobs}" -ge 1 ] \
@@ -205,16 +204,15 @@ clone_or_update_one() {
     existing_url="$(git -C "${repo_dir}" remote get-url origin 2>/dev/null || true)"
     if [ -n "${existing_url}" ] && [ "${existing_url}" != "${url}" ]; then
       safe_existing_url="$(ghorg_safe_print "${GHORG_MAX_DISPLAY_LEN}" "${existing_url}")"
-      printf '%s\n' \
-        "warn: '${repo_dir}': origin is '${safe_existing_url}', expected '${url}'; skipping (name collision?)" >&2
+      log warn "'${repo_dir}': origin is '${safe_existing_url}', expected '${url}'; skipping (name collision?)"
       return 0
     fi
 
     if [ "${dry_run}" = '1' ]; then
-      printf '%s\n' "DRY-RUN: update ${repo_dir}"
+      log notice "DRY-RUN: update ${repo_dir}"
       return 0
     fi
-    [ "${verbose}" = '1' ] && printf '%s\n' "update: ${repo_dir}"
+    [ "${verbose}" = '1' ] && log notice "update: ${repo_dir}"
     ## --ff-only refuses anything but a clean fast-forward; safer than
     ## `pull` for unattended runs where divergence would otherwise
     ## attempt a merge.
@@ -225,19 +223,18 @@ clone_or_update_one() {
       ## current branch - immune to tag/branch name collisions.
       if ! git -C "${repo_dir}" merge --ff-only "@{u}" 2>/dev/null; then
         safe_branch="$(ghorg_safe_print "${GHORG_MAX_REPO_NAME_LEN}" "${current_branch}")"
-        printf '%s\n' \
-          "warn: '${repo_dir}': '${safe_branch}' not fast-forwardable, skipping merge" >&2
+        log warn "'${repo_dir}': '${safe_branch}' not fast-forwardable, skipping merge"
       fi
     fi
   elif [ -e "${repo_dir}" ]; then
-    printf '%s\n' "warn: '${repo_dir}' exists and is not a git checkout, skipping" >&2
+    log warn "'${repo_dir}' exists and is not a git checkout, skipping"
     return 0
   else
     if [ "${dry_run}" = '1' ]; then
-      printf '%s\n' "DRY-RUN: clone ${url} -> ${repo_dir}"
+      log notice "DRY-RUN: clone ${url} -> ${repo_dir}"
       return 0
     fi
-    [ "${verbose}" = '1' ] && printf '%s\n' "clone: ${url}"
+    [ "${verbose}" = '1' ] && log notice "clone: ${url}"
     clone_args=( clone )
     [ "${shallow}" = '1' ] && clone_args+=( --depth=1 )
     ## protocol.file.allow=never / protocol.ext.allow=never block a
@@ -273,7 +270,7 @@ main() {
   fi
 
   repo_count="$(printf '%s\n' "${repos}" | wc --lines)"
-  printf '%s\n' "${repo_count} repos to process under ${dest_dir}"
+  log notice "${repo_count} repos to process under ${dest_dir}"
 
   ## Bounded parallelism: keep at most ${jobs} background jobs alive.
   active=0

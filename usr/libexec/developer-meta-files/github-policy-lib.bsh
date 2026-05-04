@@ -71,7 +71,7 @@ policy_api_call() {
    body="${4:-}"
 
    if [ "${dry_run}" = '1' ]; then
-      printf '%s\n' "DRY-RUN: ${label} -> ${method} ${path}"
+      log notice "DRY-RUN: ${label} -> ${method} ${path}"
       [ -n "${POLICY_RECORD_FN:-}" ] && "${POLICY_RECORD_FN}" dry
       return 0
    fi
@@ -83,14 +83,14 @@ policy_api_call() {
    case "${status}" in
       200|201|202|204)
          [ "${POLICY_QUIET_OK:-0}" = '1' ] \
-            || printf '%s\n' "ok:   ${label} [${status}]"
+            || log notice "ok: ${label} [${status}]"
          [ -n "${POLICY_RECORD_FN:-}" ] && "${POLICY_RECORD_FN}" ok
          return 0
          ;;
       *)
          response_body="$(ghorg_body_of "${result}")"
          safe_body="$(ghorg_safe_print 512 "${response_body}")"
-         printf '%s\n' "warn: '${label}' ['${status}']" "${safe_body}" >&2
+         log warn "'${label}' ['${status}']: ${safe_body}"
          [ -n "${POLICY_RECORD_FN:-}" ] && "${POLICY_RECORD_FN}" warn
          return 1
          ;;
@@ -127,7 +127,7 @@ _policy_upsert_ruleset() {
       ## ci/tests/test_dm_dryrun.sh test does a fixed-string grep
       ## against "DRY-RUN: ${scope}: upsert ruleset ${name}" (no
       ## quotes around the name). Don't add quoting here.
-      printf '%s\n' "DRY-RUN: ${scope_label}: upsert ruleset ${name}"
+      log notice "DRY-RUN: ${scope_label}: upsert ruleset ${name}"
       [ -n "${POLICY_RECORD_FN:-}" ] && "${POLICY_RECORD_FN}" dry
       return 0
    fi
@@ -135,7 +135,7 @@ _policy_upsert_ruleset() {
    result="$(ghorg_api GET "${list_endpoint}?per_page=100")" || return 1
    status="$(ghorg_status_of "${result}")"
    if [ "${status}" != '200' ]; then
-      printf '%s\n' "warn: '${scope_label}': list rulesets returned '${status}'" >&2
+      log warn "'${scope_label}': list rulesets returned '${status}'"
       [ -n "${POLICY_RECORD_FN:-}" ] && "${POLICY_RECORD_FN}" warn
       return 1
    fi
@@ -149,8 +149,7 @@ _policy_upsert_ruleset() {
       if ! [[ "${existing_id}" =~ ^[0-9]+$ ]] \
          || [ "${#existing_id}" -gt "${GHORG_MAX_ID_LEN}" ]; then
          safe_id="$(ghorg_safe_print 32 "${existing_id}")"
-         printf '%s\n' \
-            "warn: '${scope_label}': ruleset id '${safe_id}' not a valid numeric id" >&2
+         log warn "'${scope_label}': ruleset id '${safe_id}' not a valid numeric id"
          [ -n "${POLICY_RECORD_FN:-}" ] && "${POLICY_RECORD_FN}" warn
          return 1
       fi

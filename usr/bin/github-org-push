@@ -164,8 +164,7 @@ target_owner="$2"
 [ "${mode_set}" -eq 1 ] \
    || { show_help >&2; die 64 'specify exactly one of --apply / --dry-run'; }
 
-## 'git' beyond the base API deps - this tool pushes refs.
-ghorg_require_deps git
+ghorg_require_deps
 ghorg_validate_name "${target_owner}" user
 ghorg_validate_name "${remote_name}" user
 is_whole_number "${jobs}" \
@@ -195,7 +194,7 @@ push_one() {
   ## a hostile filesystem can't smuggle bad names either.
   if ! ghorg_validate_name "${repo}" repo; then
     safe_repo_dir="$(ghorg_safe_print "${GHORG_MAX_DISPLAY_LEN}" "${repo_dir}")"
-    printf '%s\n' "warn: skipping '${safe_repo_dir}' (invalid name)" >&2
+    log warn "skipping '${safe_repo_dir}' (invalid name)"
     return 0
   fi
 
@@ -212,17 +211,14 @@ push_one() {
         ## Reserved flag for future use; deliberately not implemented to
         ## avoid surprise repo creation. github-org-fork is the supported
         ## path for adding repos to the target.
-        printf '%s\n' \
-          "warn: '${target_owner}/${repo}' missing - run github-org-fork to create it; skipping" >&2
+        log warn "'${target_owner}/${repo}' missing - run github-org-fork to create it; skipping"
       else
-        printf '%s\n' \
-          "warn: '${target_owner}/${repo}' does not exist on target, skipping" >&2
+        log warn "'${target_owner}/${repo}' does not exist on target, skipping"
       fi
       return 0
       ;;
     *)
-      printf '%s\n' \
-        "error: '${target_owner}/${repo}' lookup failed (auth or transient); not pushing" >&2
+      log error "'${target_owner}/${repo}' lookup failed (auth or transient); not pushing"
       return 1
       ;;
   esac
@@ -230,8 +226,7 @@ push_one() {
   url="$(remote_url "${repo}")"
 
   if [ "${dry_run}" = '1' ]; then
-    printf '%s\n' \
-      "DRY-RUN: push ${repo_dir} -> ${url} (branches: ${branches}, tags: ${push_tags})"
+    log notice "DRY-RUN: push ${repo_dir} -> ${url} (branches: ${branches}, tags: ${push_tags})"
     return 0
   fi
 
@@ -251,36 +246,36 @@ push_one() {
       ## refs/heads/<branch> for an attached HEAD; for a detached HEAD
       ## it returns non-zero, which we treat as "skip with warning".
       if ! resolved_head="$(git -C "${repo_dir}" symbolic-ref HEAD 2>/dev/null)"; then
-        printf '%s\n' "warn: '${repo_dir}': HEAD detached, skipping HEAD push" >&2
+        log warn "'${repo_dir}': HEAD detached, skipping HEAD push"
         continue
       fi
-      [ "${verbose}" = '1' ] && printf '%s\n' \
-        "push ${resolved_head} ${repo_dir} -> ${remote_name}"
+      [ "${verbose}" = '1' ] \
+        && log notice "push ${resolved_head} ${repo_dir} -> ${remote_name}"
       git -C "${repo_dir}" push -- "${remote_name}" \
-        "${resolved_head}:${resolved_head}" || \
-        printf '%s\n' \
-          "warn: '${repo_dir}': '${resolved_head}' push to '${remote_name}' failed" >&2
+        "${resolved_head}:${resolved_head}" \
+        || log warn "'${repo_dir}': '${resolved_head}' push to '${remote_name}' failed"
     else
       ## Validate the user-supplied branch name as a repo-name (same
       ## allowlist) before constructing a fully-qualified ref. This
       ## both blocks ref injection like `master HEAD` and prevents
       ## tag/branch ambiguity (we always use refs/heads/...).
       if ! ghorg_validate_name "${branch}" repo; then
-        printf '%s\n' "warn: '${repo_dir}': skipping invalid branch name" >&2
+        log warn "'${repo_dir}': skipping invalid branch name"
         continue
       fi
-      [ "${verbose}" = '1' ] && printf '%s\n' "push ${branch} ${repo_dir} -> ${remote_name}"
+      [ "${verbose}" = '1' ] \
+        && log notice "push ${branch} ${repo_dir} -> ${remote_name}"
       git -C "${repo_dir}" push -- "${remote_name}" \
-        "refs/heads/${branch}:refs/heads/${branch}" || \
-        printf '%s\n' \
-          "warn: '${repo_dir}': branch '${branch}' push to '${remote_name}' failed" >&2
+        "refs/heads/${branch}:refs/heads/${branch}" \
+        || log warn "'${repo_dir}': branch '${branch}' push to '${remote_name}' failed"
     fi
   done
 
   if [ "${push_tags}" = '1' ]; then
-    [ "${verbose}" = '1' ] && printf '%s\n' "push --tags ${repo_dir} -> ${remote_name}"
-    git -C "${repo_dir}" push --tags -- "${remote_name}" || \
-      printf '%s\n' "warn: '${repo_dir}': tag push to '${remote_name}' failed" >&2
+    [ "${verbose}" = '1' ] \
+      && log notice "push --tags ${repo_dir} -> ${remote_name}"
+    git -C "${repo_dir}" push --tags -- "${remote_name}" \
+      || log warn "'${repo_dir}': tag push to '${remote_name}' failed"
   fi
 }
 
@@ -326,7 +321,7 @@ main() {
     return 0
   fi
 
-  printf '%s\n' "'${candidate_count}' repos to process"
+  log notice "'${candidate_count}' repos to process"
 
   active=0
   for repo_dir in "${candidate_dirs[@]}"; do

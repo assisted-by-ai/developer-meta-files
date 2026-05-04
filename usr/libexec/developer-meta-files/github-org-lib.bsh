@@ -145,20 +145,19 @@ ghorg_token() {
   printf '%s' "${token}"
 }
 
-## Verifies the base runtime deps (curl, jq, sanitize-string) plus
-## any additional commands the caller passes positionally. The
-## github-org-* tools that exec git directly should pass 'git' so a
-## missing-git environment fails fast at startup instead of partway
-## through a per-repo loop.
+## Verifies the runtime deps every github-org-* / dm-github-* tool
+## needs. git is included even though dm-github-policy and
+## dm-github-personal-policy never exec git themselves - the entire
+## family is meant to run in a git-using operator environment, and
+## demanding git unconditionally is simpler than threading per-tool
+## extras through callers.
 ##
 ## sanitize-string comes from helper-scripts and is what makes the
 ## display-sink boundary safe.
-##
-## Args: $@ - extra commands beyond the base set.
 ghorg_require_deps() {
   local cmd
 
-  for cmd in curl jq sanitize-string "$@"; do
+  for cmd in curl jq sanitize-string git; do
     has "${cmd}" || { log error "required command not found: '${cmd}'"; return 1; }
   done
 }
