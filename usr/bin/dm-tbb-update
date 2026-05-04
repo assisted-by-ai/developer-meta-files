@@ -19,6 +19,8 @@ derivative_maker_source_code_dir="$HOME/derivative-maker"
 
 source "$derivative_maker_source_code_dir/help-steps/pre"
 
+package-installed-check tb-updater
+
 version_check() {
    if [ "${1,,}" = "" ]; then
       printf '%s\n' "${red}${bold}FATAL ERROR: Invalid version (empty)!${reset}"
