@@ -65,7 +65,11 @@ for script_path in "${files[@]}"; do
       fail=1
       continue
    fi
-   if ! shellcheck -- "${script_path}"; then
+   ## --external-sources lets shellcheck follow the '# shellcheck
+   ## source=...' directives, which is needed so SC2317 ("command
+   ## appears to be unreachable") does not fire for show_help and
+   ## similar callbacks invoked indirectly from the policy lib.
+   if ! shellcheck --external-sources -- "${script_path}"; then
       fail=1
    fi
 done

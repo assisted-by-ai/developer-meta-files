@@ -163,23 +163,10 @@ OSSF Scorecard mapping:
 EOF
 }
 
-policy_parse_mode_args "$@"
-
-[ "${#positional[@]}" -eq 0 ] \
-   || die 64 "expected no positional arguments, got '${#positional[@]}'"
-
-[ "${mode_set}" -eq 1 ] \
-   || { show_help >&2; die 64 'specify exactly one of --apply / --audit / --dry-run'; }
-
-ghorg_require_deps
-
-## Single bit of bookkeeping: the lib's policy_api_call and the
-## ruleset-upsert helper set this to 1 on every warn path (caller-
-## scope mutation via bash dynamic scoping). main() inits it to 0
-## and tests it at exit. The operator already sees each warn line
-## in the log; CI / cron callers only need the at-least-one bit.
-## No per-status counters or summary printout.
-policy_warn_seen=0
+## Parse + post-check + dep pre-flight + warn-flag init. See the
+## docstring on policy_tool_init in github-policy-lib.bsh; this tool
+## takes no positional args.
+policy_tool_init 0 "$@"
 
 ## Idempotent code-security-configuration upsert + attach + default.
 ## Replaces the deprecated PATCH /orgs/{org} security-defaults fields

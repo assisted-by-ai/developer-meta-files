@@ -85,18 +85,12 @@ Auth:
 EOF
 }
 
-positional=()
-policy_parse_mode_args "$@"
-
-[ "${#positional[@]}" -eq 1 ] \
-   || { show_help >&2; die 64 "expected exactly 1 positional argument (<username>), got '${#positional[@]}'"; }
-
-[ "${mode_set}" -eq 1 ] \
-   || { show_help >&2; die 64 'specify exactly one of --apply / --audit / --dry-run'; }
+## Parse + post-check + dep pre-flight + warn-flag init. See the
+## docstring on policy_tool_init in github-policy-lib.bsh; this tool
+## takes one positional arg, the GitHub username to lock down.
+policy_tool_init 1 "$@"
 
 target_user="${positional[0]}"
-
-ghorg_require_deps
 ghorg_validate_name "${target_user}" user
 
 ## Refuse to run against an Organization. ghorg_validate_name only
@@ -120,13 +114,6 @@ readonly RULESET_NAME_TAG='dm-github-personal-policy tag protection'
 ## --verbose suppresses the 'ok:' line otherwise printed by
 ## policy_api_call. Apply runs without --verbose are quiet on success.
 [ "${verbose}" = '1' ] || POLICY_QUIET_OK=1
-
-## Single bit of bookkeeping: the lib's policy_api_call and the
-## ruleset-upsert helper set this to 1 on every warn path (caller-
-## scope mutation via bash dynamic scoping). The per-repo loop is
-## sequential, so the mutations propagate directly. After the loop
-## the tool exits 1 if set, 0 otherwise.
-policy_warn_seen=0
 
 apply_repo_policy() {
    local repo
