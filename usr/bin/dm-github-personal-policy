@@ -121,6 +121,21 @@ readonly RULESET_NAME_TAG='dm-github-personal-policy tag protection'
 ## policy_api_call. Apply runs without --verbose are quiet on success.
 [ "${verbose}" = '1' ] || POLICY_QUIET_OK=1
 
+## Single bit of bookkeeping: did any warn happen anywhere? Each
+## apply_repo_policy step chains policy_api_call with '|| true' to
+## let the loop continue on a per-call failure; without this flag,
+## those failures would silently zero out at exit. policy_api_call
+## from the lib appends one byte to the file on warn (atomic
+## single-byte appends are PIPE_BUF-safe even from backgrounded
+## children).
+dm_github_personal_policy_cleanup_warn_file() {
+   # shellcheck disable=SC2317  ## invoked indirectly via trap
+   safe-rm --force -- "${POLICY_WARN_FILE}"
+}
+POLICY_WARN_FILE="$(mktemp)"
+export POLICY_WARN_FILE
+trap dm_github_personal_policy_cleanup_warn_file EXIT
+
 apply_repo_policy() {
    local repo
 
@@ -295,3 +310,9 @@ case "${mode}" in
       done <<< "${repos}"
       ;;
 esac
+
+## Non-zero exit if at least one warn happened anywhere - CI / cron
+## callers can tell the run was unsuccessful without parsing log
+## output. Operator reads the warn lines above to see what failed.
+[ -s "${POLICY_WARN_FILE}" ] && exit 1
+exit 0

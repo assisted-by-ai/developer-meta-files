@@ -31,12 +31,15 @@
 ##
 ## Optional caller-set globals:
 ##
-##   ${POLICY_RECORD_FN}  - if non-empty, name of a function called
-##                          as ${POLICY_RECORD_FN} <category> on
-##                          each policy_api_call (categories: ok,
-##                          warn, dry). dm-github-policy sets this
-##                          to api_record so its per-run event
-##                          counter still works.
+##   ${POLICY_WARN_FILE}  - if non-empty, every warn path appends one
+##                          byte to this file. Caller is expected to
+##                          create it as a tempfile, export it before
+##                          spawning per-repo background jobs (atomic
+##                          single-byte appends are PIPE_BUF-safe), and
+##                          test '[ -s "${file}" ]' afterward to learn
+##                          "did at least one warn happen anywhere".
+##                          Replaces a per-status counting scheme:
+##                          callers do not need ok / dry / skip totals.
 ##   ${POLICY_QUIET_OK}   - if '1', the 'ok:' line is suppressed
 ##                          (apply runs without --verbose).
 
@@ -51,9 +54,9 @@
 ## API call wrapper
 ## ============================================================================
 
-## Dry-run-aware wrapper around ghorg_api. Prints DRY-RUN / ok / warn
-## prefixes; optionally calls ${POLICY_RECORD_FN} for per-tool
-## bookkeeping.
+## Dry-run-aware wrapper around ghorg_api. Logs at notice / warn level
+## and, on warn, touches ${POLICY_WARN_FILE} so the caller can detect
+## "at least one warn happened anywhere" without a counting scheme.
 ##
 ## Args:
 ##   $1 - human-readable label (printed after the prefix)
@@ -61,7 +64,7 @@
 ##   $3 - URL path (relative to ${GHORG_API})
 ##   $4 - JSON body (optional; required by POST / PUT / PATCH)
 ##
-## Returns: 0 on success (or dry-run), 1 on failure (after warn print).
+## Returns: 0 on success (or dry-run), 1 on failure (after warn).
 policy_api_call() {
    local label method path body result status response_body safe_body
 
@@ -72,11 +75,10 @@ policy_api_call() {
 
    if [ "${dry_run}" = '1' ]; then
       log notice "DRY-RUN: ${label} -> ${method} ${path}"
-      [ -n "${POLICY_RECORD_FN:-}" ] && "${POLICY_RECORD_FN}" dry
       return 0
    fi
    result="$(ghorg_api "${method}" "${path}" "${body}")" || {
-      [ -n "${POLICY_RECORD_FN:-}" ] && "${POLICY_RECORD_FN}" warn
+      _policy_mark_warn
       return 1
    }
    status="$(ghorg_status_of "${result}")"
@@ -84,17 +86,26 @@ policy_api_call() {
       200|201|202|204)
          [ "${POLICY_QUIET_OK:-0}" = '1' ] \
             || log notice "ok: ${label} [${status}]"
-         [ -n "${POLICY_RECORD_FN:-}" ] && "${POLICY_RECORD_FN}" ok
          return 0
          ;;
       *)
          response_body="$(ghorg_body_of "${result}")"
          safe_body="$(ghorg_safe_print 512 "${response_body}")"
          log warn "'${label}' ['${status}']: ${safe_body}"
-         [ -n "${POLICY_RECORD_FN:-}" ] && "${POLICY_RECORD_FN}" warn
+         _policy_mark_warn
          return 1
          ;;
    esac
+}
+
+## Append one byte to ${POLICY_WARN_FILE} so the caller can later
+## test '[ -s "${POLICY_WARN_FILE}" ]'. Single-byte appends are
+## atomic across concurrent backgrounded writers (PIPE_BUF >= 4096
+## on Linux), so the per-repo & background loop in dm-github-policy
+## does not need an extra mutex.
+_policy_mark_warn() {
+   [ -n "${POLICY_WARN_FILE:-}" ] || return 0
+   printf '%s' 'w' >> "${POLICY_WARN_FILE}"
 }
 
 ## ============================================================================
@@ -128,15 +139,17 @@ _policy_upsert_ruleset() {
       ## against "DRY-RUN: ${scope}: upsert ruleset ${name}" (no
       ## quotes around the name). Don't add quoting here.
       log notice "DRY-RUN: ${scope_label}: upsert ruleset ${name}"
-      [ -n "${POLICY_RECORD_FN:-}" ] && "${POLICY_RECORD_FN}" dry
       return 0
    fi
 
-   result="$(ghorg_api GET "${list_endpoint}?per_page=100")" || return 1
+   result="$(ghorg_api GET "${list_endpoint}?per_page=100")" || {
+      _policy_mark_warn
+      return 1
+   }
    status="$(ghorg_status_of "${result}")"
    if [ "${status}" != '200' ]; then
       log warn "'${scope_label}': list rulesets returned '${status}'"
-      [ -n "${POLICY_RECORD_FN:-}" ] && "${POLICY_RECORD_FN}" warn
+      _policy_mark_warn
       return 1
    fi
    existing_id="$(ghorg_body_of "${result}" \
@@ -150,7 +163,7 @@ _policy_upsert_ruleset() {
          || [ "${#existing_id}" -gt "${GHORG_MAX_ID_LEN}" ]; then
          safe_id="$(ghorg_safe_print 32 "${existing_id}")"
          log warn "'${scope_label}': ruleset id '${safe_id}' not a valid numeric id"
-         [ -n "${POLICY_RECORD_FN:-}" ] && "${POLICY_RECORD_FN}" warn
+         _policy_mark_warn
          return 1
       fi
       policy_api_call "${scope_label}: update ruleset '${name}' id=${existing_id}" \

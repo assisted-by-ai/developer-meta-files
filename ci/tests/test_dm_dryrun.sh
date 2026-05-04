@@ -29,9 +29,27 @@ FIXTURE_DIR="$(cd -- "${SCRIPT_DIR}/../fixtures" && pwd)"
 export GHORG_MOCK=1
 export GHORG_MOCK_DIR="${FIXTURE_DIR}"
 
+## Capture combined stdout+stderr; the lib routes everything through
+## log_run_die.sh's stecho >&2.
+set +o errexit
 out="$(dm-github-policy --dry-run 2>&1)"
+rc=$?
+set -o errexit
 
 fail=0
+
+## Dry-run does no real API calls (policy_api_call short-circuits
+## before ghorg_api), so no warn path can fire and exit must be 0.
+## A non-zero exit here means dm-github-policy's POLICY_WARN_FILE
+## flag ended up non-empty, i.e. a warn slipped through somewhere
+## the lib structurally said it could not - investigate before
+## papering over. Exit-code check replaces the prior brittle
+## "no [WARN]: in output" regex.
+if [ "${rc}" -ne 0 ]; then
+   printf '%s\n' "FAIL: --dry-run exited non-zero (rc='${rc}'); a warn slipped through" >&2
+   fail=1
+fi
+
 required=(
    'DRY-RUN: org-ai-assisted: fork-PR approval=all_external_contributors'
    'DRY-RUN: org-ai-assisted: workflow GITHUB_TOKEN read-only, no PR approval'
@@ -46,7 +64,6 @@ required=(
    'skip: org-ai-assisted: GitHub App / OAuth App policies must be set via UI'
    'DRY-RUN: org-ai-assisted: upsert ruleset dm-github-policy default-branch protection'
    'DRY-RUN: org-ai-assisted: upsert ruleset dm-github-policy tag protection'
-   '=== summary ==='
 )
 for needle in "${required[@]}"; do
    if ! grep --quiet --fixed-strings -- "${needle}" <<< "${out}"; then
@@ -54,19 +71,5 @@ for needle in "${required[@]}"; do
       fail=1
    fi
 done
-
-## --dry-run must not emit a real success/failure line. Those come
-## from policy_api_call's 2xx / non-2xx branch and route through
-## 'log notice "ok: ..."' / 'log warn "..."', which produce
-## "<script> [NOTICE]: ok: ..." and "<script> [WARN]: ..." lines.
-## Match only the level-tag-then-content junction so the dry-run
-## summary count line "<script> [NOTICE]:   ok:      0" (with two
-## extra spaces of indent) is not a false positive.
-if grep --quiet --extended-regexp -- '\]: ok: |\[WARN\]:' <<< "${out}"; then
-   printf '%s\n' \
-      'FAIL: --dry-run unexpectedly printed real-API ok:/warn output:' >&2
-   grep --extended-regexp -- '\]: ok: |\[WARN\]:' <<< "${out}" | head -5 >&2
-   fail=1
-fi
 
 exit "${fail}"

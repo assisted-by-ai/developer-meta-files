@@ -174,27 +174,14 @@ policy_parse_mode_args "$@"
 
 ghorg_require_deps
 
-## Per-run event counter. main() creates a tempfile; api_record
-## appends one word per event (ok | warn | dry | skip) and main()
-## sums them at the end. Tempfile rather than a bash variable because
-## the per-repo loop backgrounds children with `&`; PIPE_BUF (4096B on
-## Linux) makes our 4-5 byte appends atomic across concurrent writers.
-api_counter_file=''
-
-api_record() {
-   [ -n "${api_counter_file}" ] || return 0
-   printf '%s\n' "$1" >> "${api_counter_file}"
-}
-
-record_skip() {
-   api_record skip
-}
-
-## github-policy-lib.bsh's policy_api_call invokes ${POLICY_RECORD_FN}
-## per event so this tool's per-run tally still gets the ok/warn/dry
-## counts. The lib's wrapper replaces the local api_call we used to
-## carry here.
-POLICY_RECORD_FN='api_record'
+## main() creates a tempfile and exports its path as POLICY_WARN_FILE
+## so the lib's policy_api_call appends one byte to it on every warn
+## (across the org-level apply path AND the per-repo backgrounded
+## loop). main() then tests '[ -s "${POLICY_WARN_FILE}" ]' to learn
+## "did at least one warn happen anywhere", which is the only signal
+## a CI / cron caller needs - exit non-zero on warn, zero otherwise.
+## No per-status counters, no summary printout: the operator can read
+## the log lines above to see what specifically went wrong.
 
 ## Idempotent code-security-configuration upsert + attach + default.
 ## Replaces the deprecated PATCH /orgs/{org} security-defaults fields
@@ -233,19 +220,18 @@ apply_code_security_config() {
       log notice "DRY-RUN: ${org}: upsert code-security configuration ${CODE_SEC_CONFIG_NAME}"
       log notice "DRY-RUN: ${org}: attach code-security configuration scope=all"
       log notice "DRY-RUN: ${org}: set code-security configuration default_for_new_repos=all"
-      api_record dry; api_record dry; api_record dry
       return 0
    fi
 
    ## Find existing configuration by name.
    list_result="$(ghorg_api GET "/orgs/${org}/code-security/configurations?per_page=100")" \
-      || { api_record warn; return 1; }
+      || { _policy_mark_warn; return 1; }
    list_status="$(ghorg_status_of "${list_result}")"
    if [ "${list_status}" != '200' ]; then
       list_body="$(ghorg_body_of "${list_result}")"
       list_safe_body="$(ghorg_safe_print 512 "${list_body}")"
       log warn "${org}: list code-security configurations [${list_status}]: ${list_safe_body}"
-      api_record warn
+      _policy_mark_warn
       return 1
    fi
    existing_id="$(ghorg_body_of "${list_result}" \
@@ -259,7 +245,7 @@ apply_code_security_config() {
          [ "${#existing_id}" -gt "${GHORG_MAX_ID_LEN}" ]; then
          safe_id="$(ghorg_safe_print 32 "${existing_id}")"
          log warn "'${org}': code-security config id '${safe_id}' not a valid numeric id"
-         api_record warn
+         _policy_mark_warn
          return 1
       fi
       policy_api_call "${org}: update code-security configuration id=${existing_id}" \
@@ -269,19 +255,18 @@ apply_code_security_config() {
       ## POST returns the new config object including its id; we need
       ## the id for the attach + default calls.
       create_result="$(ghorg_api POST "/orgs/${org}/code-security/configurations" "${config_body}")" \
-         || { api_record warn; return 1; }
+         || { _policy_mark_warn; return 1; }
       create_status="$(ghorg_status_of "${create_result}")"
       case "${create_status}" in
          200|201)
             existing_id="$(ghorg_body_of "${create_result}" | jq -r -- '.id')"
             log notice "ok: ${org}: created code-security configuration id=${existing_id} [${create_status}]"
-            api_record ok
             ;;
          *)
             create_body="$(ghorg_body_of "${create_result}")"
             create_safe_body="$(ghorg_safe_print 512 "${create_body}")"
             log warn "${org}: create code-security configuration [${create_status}]: ${create_safe_body}"
-            api_record warn
+            _policy_mark_warn
             return 1
             ;;
       esac
@@ -371,7 +356,6 @@ apply_org_policy() {
    ##     mandatory account requirement, so the org-level toggle just
    ##     front-runs that. Print a skip with the UI URL.
    log notice "skip: ${org}: 2FA enforcement must be set via UI - see https://github.com/organizations/${org}/settings/security"
-   record_skip
 
    ## 5+6. Code security via the Code Security Configurations API
    ##      (replaces deprecated PATCH /orgs/{org} security-defaults
@@ -402,12 +386,10 @@ apply_org_policy() {
    ##    requests and approved PATs but no stable setters; --audit
    ##    lists what's in flight, --apply prints a skip + UI URL.
    log notice "skip: ${org}: PAT policy toggles must be set via UI - see https://github.com/organizations/${org}/settings/personal-access-tokens"
-   record_skip
 
    ## 10. GitHub App / OAuth App install policies (UI-only). Same
    ##     pattern as step 9.
    log notice "skip: ${org}: GitHub App / OAuth App policies must be set via UI - see https://github.com/organizations/${org}/settings/installations and https://github.com/organizations/${org}/settings/oauth_application_policy"
-   record_skip
 }
 
 ## One-line GET-and-print helper for audit_org_state. Args:
@@ -676,12 +658,13 @@ apply_repo_policy() {
       PATCH "/repos/${owner}/${repo}" "${patch}" || true
 }
 
-dm_github_policy_cleanup_counter_file() {
-   safe-rm --force -- "${api_counter_file}"
+dm_github_policy_cleanup_warn_file() {
+   # shellcheck disable=SC2317  ## invoked indirectly via trap
+   safe-rm --force -- "${POLICY_WARN_FILE}"
 }
 
 main() {
-   local org repos active repo n_ok n_warn n_dry n_skip
+   local org repos active repo
    if [ "${mode}" = 'audit' ]; then
       for org in "${ORGS[@]}"; do
          audit_org_state "${org}"
@@ -689,12 +672,14 @@ main() {
       return 0
    fi
 
-   ## Set up the tally tempfile before any api_call runs. Children
-   ## from the per-repo parallel loop inherit api_counter_file via
-   ## environment so their api_record appends land in the same file.
-   api_counter_file="$(mktemp)"
-   export api_counter_file
-   trap dm_github_policy_cleanup_counter_file EXIT
+   ## Set up the warn-flag tempfile before any policy_api_call runs.
+   ## Backgrounded children from the per-repo loop inherit the env
+   ## var so their warn appends land in the same file. Single-byte
+   ## appends are atomic across concurrent writers (see
+   ## github-policy-lib.bsh _policy_mark_warn).
+   POLICY_WARN_FILE="$(mktemp)"
+   export POLICY_WARN_FILE
+   trap dm_github_policy_cleanup_warn_file EXIT
 
    for org in "${ORGS[@]}"; do
       apply_org_policy "${org}"
@@ -723,26 +708,13 @@ main() {
       wait
    done
 
-   ## End-of-run summary. Each api_call / record_skip appended one
-   ## line per event; sum by status.
-   n_ok="$(  grep --count -- '^ok$'   "${api_counter_file}" 2>/dev/null || true)"
-   n_warn="$(grep --count -- '^warn$' "${api_counter_file}" 2>/dev/null || true)"
-   n_dry="$( grep --count -- '^dry$'  "${api_counter_file}" 2>/dev/null || true)"
-   n_skip="$(grep --count -- '^skip$' "${api_counter_file}" 2>/dev/null || true)"
-   ## grep returns "" when the file is empty; normalize to 0.
-   n_ok="${n_ok:-0}"; n_warn="${n_warn:-0}"
-   n_dry="${n_dry:-0}"; n_skip="${n_skip:-0}"
-
-   log notice "=== summary ==="
-   log notice "  ok:      ${n_ok}"
-   log notice "  warn:    ${n_warn}"
-   log notice "  dry-run: ${n_dry}"
-   log notice "  skip:    ${n_skip}   (UI-only; see \"skip:\" lines above)"
-   log notice "done."
-
-   ## Non-zero exit if anything went wrong, so callers (cron, CI) can
-   ## react. dry-run + skip are not failures.
-   if [ "${n_warn}" -gt 0 ]; then
+   ## Single bit of bookkeeping: did any warn happen anywhere? CI /
+   ## cron callers want a non-zero exit when something went wrong;
+   ## the operator reads the log lines above to see what specifically
+   ## failed. No per-status counters or summary printout - those add
+   ## noise without adding signal beyond what the log lines already
+   ## convey.
+   if [ -s "${POLICY_WARN_FILE}" ]; then
       return 1
    fi
 }
