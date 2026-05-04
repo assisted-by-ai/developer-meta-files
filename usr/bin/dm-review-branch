@@ -14,7 +14,7 @@ true "INFO: Currently running script: ${BASH_SOURCE[0]} $*"
 
 check-ref-commits-for-unicode "${1}"
 
-git log ..."...${1}"
+git log "...${1}"
 
 git diff --stat "...${1}"
 
