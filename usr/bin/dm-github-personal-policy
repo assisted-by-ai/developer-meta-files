@@ -103,6 +103,21 @@ target_user="${positional[0]}"
 ghorg_require_deps
 ghorg_validate_name "${target_user}" user
 
+## Refuse to run against an Organization. ghorg_validate_name only
+## checks the string format - both 'alice' and 'whonix' pass. Without
+## this guard, an operator who typed an org name by mistake would
+## have the personal-mirror lockdown (Actions disabled, default
+## branch ruleset, etc.) applied to every public repo in that org.
+## That is a high-blast-radius footgun on an apply run, so resolve
+## the account type via the GET /users/{name} endpoint and bail out
+## unless GitHub reports type=User.
+target_account_type="$(ghorg_account_type "${target_user}")" \
+   || die 1 "could not determine account type for '${target_user}'"
+if [ "${target_account_type}" != 'User' ]; then
+   safe_type="$(ghorg_safe_print 32 "${target_account_type}")"
+   die 64 "refusing to run against '${target_user}' (account type '${safe_type}', expected 'User'); use dm-github-policy for organizations"
+fi
+
 readonly RULESET_NAME_BRANCH='dm-github-personal-policy default-branch protection'
 readonly RULESET_NAME_TAG='dm-github-personal-policy tag protection'
 
