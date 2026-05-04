@@ -36,9 +36,14 @@ readonly RULESET_NAME_BRANCH='dm-github-policy default-branch protection'
 readonly RULESET_NAME_TAG='dm-github-policy tag protection'
 readonly CODE_SEC_CONFIG_NAME='dm-github-policy code security'
 
+## Modes are mutually exclusive; one must be passed explicitly. No
+## implicit default - running this tool without a mode flag would
+## otherwise apply mutations under "what the operator forgot to type"
+## semantics. mode_set is checked after parsing.
 dry_run=0
 verbose=0
-mode='apply'   ## apply | audit
+mode=''
+mode_set=0
 
 show_help() {
    cat <<'EOF'
@@ -49,8 +54,8 @@ preferred over per-repo where possible: enabling a security feature
 "for all existing repos" via a single org-level call beats iterating
 every repo, both for atomicity and for new-repo coverage.
 
-Usage:
-  dm-github-policy             ## apply policy to Kicksecure + Whonix
+Usage (one mode flag is required - no implicit default):
+  dm-github-policy --apply     ## apply policy to Kicksecure + Whonix
   dm-github-policy --dry-run   ## report planned changes only
   dm-github-policy --audit     ## read-only inspection of current state
                                ## (current settings, members lacking
@@ -158,12 +163,20 @@ EOF
 
 while [ "$#" -gt 0 ]; do
    case "$1" in
+      --apply)
+         mode='apply'
+         mode_set=1
+         shift
+         ;;
       --dry-run)
+         mode='apply'
          dry_run=1
+         mode_set=1
          shift
          ;;
       --audit)
          mode='audit'
+         mode_set=1
          shift
          ;;
       -v|--verbose)
@@ -180,6 +193,9 @@ while [ "$#" -gt 0 ]; do
          ;;
    esac
 done
+
+[ "${mode_set}" -eq 1 ] \
+   || { show_help >&2; die 64 'specify exactly one of --apply / --audit / --dry-run'; }
 
 ghorg_require_deps
 

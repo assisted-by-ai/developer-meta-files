@@ -38,7 +38,10 @@ disable_projects=0
 actions_state='leave'    ## enable | disable | leave
 workflow_perms='leave'   ## read | write | leave
 sync_branches=0
+## Mode is mutually exclusive; one of --apply / --dry-run must be
+## passed explicitly. No implicit default.
 dry_run=0
+mode_set=0
 verbose=0
 
 show_help() {
@@ -152,8 +155,13 @@ while [ "$#" -gt 0 ]; do
       sync_branches=1
       shift
       ;;
+    --apply)
+      mode_set=1
+      shift
+      ;;
     --dry-run)
       dry_run=1
+      mode_set=1
       shift
       ;;
     -v|--verbose)
@@ -184,6 +192,9 @@ fi
 
 source_owner="$1"
 target_owner="$2"
+
+[ "${mode_set}" -eq 1 ] \
+   || { show_help >&2; die 64 'specify exactly one of --apply / --dry-run'; }
 
 ## OR-combine multi-flag --include / --exclude lists into single
 ## regexes (extended) consumed by ghorg_filter_names below. Each

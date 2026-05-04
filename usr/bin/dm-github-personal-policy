@@ -21,9 +21,15 @@ shopt -s shift_verbose
 # shellcheck source=/usr/libexec/developer-meta-files/github-org-lib.bsh
 source /usr/libexec/developer-meta-files/github-org-lib.bsh
 
+## Modes are mutually exclusive; one must be passed explicitly. No
+## implicit default - running this tool without a mode flag is the
+## kind of "intent unclear" footgun we don't want operators to fall
+## into. Empty mode triggers a 'specify --apply / --audit / --dry-run'
+## error after parsing.
 dry_run=0
 verbose=0
-mode='apply'   ## apply | audit
+mode=''
+mode_set=0
 target_user=''
 
 show_help() {
@@ -32,9 +38,8 @@ Apply per-repo lockdown policy to every public repo owned by a
 GitHub user account. Designed for hardening a personal account
 against malicious fork PRs that could otherwise burn Actions minutes.
 
-Usage:
-  dm-github-personal-policy <username>             ## apply (default)
-  dm-github-personal-policy <username> --apply     ## apply (explicit)
+Usage (one mode flag is required - no implicit default):
+  dm-github-personal-policy <username> --apply     ## apply
   dm-github-personal-policy <username> --dry-run   ## report planned changes
   dm-github-personal-policy <username> --audit     ## read-only inspection
   dm-github-personal-policy --help
@@ -67,17 +72,19 @@ positional=()
 while [ "$#" -gt 0 ]; do
    case "$1" in
       --apply)
-         ## Explicit no-op default. Lets scripted callers state intent
-         ## rather than rely on the missing-flag default.
          mode='apply'
+         mode_set=1
          shift
          ;;
       --dry-run)
+         mode='apply'
          dry_run=1
+         mode_set=1
          shift
          ;;
       --audit)
          mode='audit'
+         mode_set=1
          shift
          ;;
       -v|--verbose)
@@ -107,6 +114,9 @@ done
 
 [ "${#positional[@]}" -eq 1 ] \
    || { show_help >&2; die 64 "expected exactly 1 positional argument (<username>), got '${#positional[@]}'"; }
+
+[ "${mode_set}" -eq 1 ] \
+   || { show_help >&2; die 64 'specify exactly one of --apply / --audit / --dry-run'; }
 
 target_user="${positional[0]}"
 

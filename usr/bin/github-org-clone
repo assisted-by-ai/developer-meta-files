@@ -39,7 +39,10 @@ exclude_re=''
 shallow=0
 url_scheme='ssh'
 jobs=4
+## Mode is mutually exclusive; one of --apply / --dry-run must be
+## passed explicitly. No implicit default.
 dry_run=0
+mode_set=0
 verbose=0
 
 show_help() {
@@ -116,8 +119,13 @@ while [ "$#" -gt 0 ]; do
       jobs="$2"
       shift 2
       ;;
+    --apply)
+      mode_set=1
+      shift
+      ;;
     --dry-run)
       dry_run=1
+      mode_set=1
       shift
       ;;
     -v|--verbose)
@@ -148,6 +156,9 @@ fi
 
 source_org="$1"
 dest_dir="${2:-.}"
+
+[ "${mode_set}" -eq 1 ] \
+   || { show_help >&2; die 64 'specify exactly one of --apply / --dry-run'; }
 
 ghorg_require_deps
 ghorg_validate_name "${source_org}" user

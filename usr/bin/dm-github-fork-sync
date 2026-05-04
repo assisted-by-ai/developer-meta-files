@@ -71,8 +71,8 @@ with the settings the project requires:
   - GitHub Actions enabled on each mirror (so Claude Code can read
     CI logs from the mirror)
 
-Usage:
-  dm-github-fork-sync             ## sync all source orgs into the mirror
+Usage (one mode flag is required - no implicit default):
+  dm-github-fork-sync --apply     ## sync all source orgs into the mirror
   dm-github-fork-sync --dry-run   ## report planned actions only
   dm-github-fork-sync --help
 
@@ -86,12 +86,15 @@ EOF
 }
 
 ## Intercept --help / -h and --debug up front. --debug enables
-## 'set -x' here AND in the spawned github-org-fork (via the
-## flag passing the option as an argv element). Other args ('$@')
-## fall through to github-org-fork untouched, preserving any
-## --dry-run / --include-private / etc. the caller passed.
+## 'set -x' here AND in the spawned github-org-fork (via the flag
+## passing the option as an argv element). Other args ('$@') fall
+## through to github-org-fork untouched. Mode (--apply / --dry-run)
+## is required: github-org-fork itself rejects an absent mode flag,
+## but checking up front in the wrapper lets the error message name
+## dm-github-fork-sync rather than the spawned tool.
 debug_flag=()
 positional_args=()
+mode_set=0
 for arg in "$@"; do
    case "${arg}" in
       -h|--help)
@@ -102,11 +105,18 @@ for arg in "$@"; do
          set -x
          debug_flag=( --debug )
          ;;
+      --apply|--dry-run)
+         mode_set=1
+         positional_args+=( "${arg}" )
+         ;;
       *)
          positional_args+=( "${arg}" )
          ;;
    esac
 done
+
+[ "${mode_set}" -eq 1 ] \
+   || { show_help >&2; die 64 'specify exactly one of --apply / --dry-run'; }
 
 has github-org-fork || die 1 "'github-org-fork' not on PATH"
 
