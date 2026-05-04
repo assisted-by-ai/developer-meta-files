@@ -49,6 +49,20 @@ Settings applied per repo:
     (require approval before fork PRs run any workflow)
   - Default workflow GITHUB_TOKEN permissions = read; cannot approve PRs
   - Allowed Actions = selected (github-owned + verified creators)
+  - Wiki / Projects / Discussions = disabled (cut abuse vectors)
+  - Secret scanning + push protection = enabled
+  - Pages site = deleted if present (one-shot, not a permanent gate)
+  - Branch ruleset on default branch: block force-push, block delete,
+    require signed commits (bypass_actors=[] - even the owner can't
+    override)
+  - Tag ruleset on all tags: block delete, block re-pointing, require
+    signed tags
+
+Deliberately NOT applied (commented out in source):
+  - Vulnerability alerts / Dependabot security updates: this account
+    is a backup/mirror of org-side repos; enabling here would
+    duplicate notifications. Uncomment if a repo becomes canonical
+    here.
 
 Repos in scope:
   - Public, non-archived, non-fork repos owned by <username>.
@@ -126,6 +140,9 @@ target_user="${positional[0]}"
 ghorg_require_deps
 ghorg_validate_name "${target_user}" user
 
+readonly RULESET_NAME_BRANCH='dm-github-personal-policy default-branch protection'
+readonly RULESET_NAME_TAG='dm-github-personal-policy tag protection'
+
 api_call() {
    local label method path body result status response_body safe_body
 
@@ -155,8 +172,53 @@ api_call() {
    esac
 }
 
+## Idempotent ruleset upsert at the per-repo level. Mirror of
+## dm-github-policy's upsert_org_ruleset, scoped to a single repo
+## rather than an entire org.
+##
+## Args: $1 = repo, $2 = ruleset name, $3 = JSON body (must include
+## the same name).
+upsert_repo_ruleset() {
+   local repo name body result status existing_id safe_id
+
+   repo="$1"
+   name="$2"
+   body="$3"
+
+   if [ "${dry_run}" = '1' ]; then
+      printf '%s\n' "DRY-RUN: ${target_user}/${repo}: upsert ruleset '${name}'"
+      return 0
+   fi
+
+   result="$(ghorg_api GET "/repos/${target_user}/${repo}/rulesets?per_page=100")" || return 1
+   status="$(ghorg_status_of "${result}")"
+   if [ "${status}" != '200' ]; then
+      printf '%s\n' "warn: '${target_user}/${repo}': list rulesets returned '${status}'" >&2
+      return 1
+   fi
+   existing_id="$(ghorg_body_of "${result}" \
+      | jq -r --arg name "${name}" -- \
+        '.[] | select(.name == $name) | .id' \
+      | head --lines=1)"
+
+   if [ -n "${existing_id}" ] && [ "${existing_id}" != 'null' ]; then
+      if ! [[ "${existing_id}" =~ ^[0-9]+$ ]] \
+         || [ "${#existing_id}" -gt "${GHORG_MAX_ID_LEN}" ]; then
+         safe_id="$(ghorg_safe_print 32 "${existing_id}")"
+         printf '%s\n' \
+            "warn: '${target_user}/${repo}': ruleset id '${safe_id}' not a valid numeric id" >&2
+         return 1
+      fi
+      api_call "${target_user}/${repo}: update ruleset '${name}' id=${existing_id}" \
+         PUT "/repos/${target_user}/${repo}/rulesets/${existing_id}" "${body}"
+   else
+      api_call "${target_user}/${repo}: create ruleset '${name}'" \
+         POST "/repos/${target_user}/${repo}/rulesets" "${body}"
+   fi
+}
+
 apply_repo_policy() {
-   local repo body
+   local repo body branch_ruleset tag_ruleset
 
    repo="$1"
 
@@ -199,6 +261,96 @@ apply_repo_policy() {
       PUT "/repos/${target_user}/${repo}/actions/permissions/selected-actions" \
       "${body}" \
       || true
+
+   ## 4. Repo settings + secret-scanning + push-protection in one PATCH.
+   ##    - has_wiki=false, has_projects=false, has_discussions=false:
+   ##      cuts wiki/projects/discussions abuse vectors. has_issues is
+   ##      left untouched (defaults on; useful for a backup mirror).
+   ##    - secret_scanning + secret_scanning_push_protection: enable
+   ##      both so accidental secrets are flagged AND blocked at push
+   ##      time. Free for public repos; requires Advanced Security on
+   ##      private repos. We're scoping to public-only anyway.
+   body="$(jq -n -- '{
+      has_wiki: false,
+      has_projects: false,
+      has_discussions: false,
+      security_and_analysis: {
+         secret_scanning: { status: "enabled" },
+         secret_scanning_push_protection: { status: "enabled" }
+      }
+   }')"
+   api_call "${target_user}/${repo}: settings (wiki/projects/discussions off, secret-scan on)" \
+      PATCH "/repos/${target_user}/${repo}" \
+      "${body}" \
+      || true
+
+   ## 5. Disable GitHub Pages site if any. The DELETE endpoint is
+   ##    idempotent in spirit: 204 if a site existed and was removed,
+   ##    404 if no site (treated by api_call as warn but harmless).
+   ##    No way to "lock pages off forever" - if a Pages workflow ever
+   ##    runs again, the site comes back. This is a one-shot cleanup,
+   ##    not a permanent gate.
+   api_call "${target_user}/${repo}: delete Pages site (if any)" \
+      DELETE "/repos/${target_user}/${repo}/pages" \
+      || true
+
+   ## 6. Branch ruleset on the default branch: block force-push, block
+   ##    deletion, require signed commits. bypass_actors=[] - no one,
+   ##    including the owner, can override.
+   branch_ruleset="$(jq -n --arg name "${RULESET_NAME_BRANCH}" -- '{
+      name: $name,
+      target: "branch",
+      enforcement: "active",
+      bypass_actors: [],
+      conditions: {
+         ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] }
+      },
+      rules: [
+         { type: "deletion" },
+         { type: "non_fast_forward" },
+         { type: "required_signatures" }
+      ]
+   }')"
+   upsert_repo_ruleset "${repo}" "${RULESET_NAME_BRANCH}" "${branch_ruleset}" || true
+
+   ## 7. Tag ruleset for all tags: block deletion, block re-pointing,
+   ##    require signed tags. Without this, push rights would let the
+   ##    operator (or a compromised credential) move release tags.
+   tag_ruleset="$(jq -n --arg name "${RULESET_NAME_TAG}" -- '{
+      name: $name,
+      target: "tag",
+      enforcement: "active",
+      bypass_actors: [],
+      conditions: {
+         ref_name: { include: ["~ALL"], exclude: [] }
+      },
+      rules: [
+         { type: "deletion" },
+         { type: "non_fast_forward" },
+         { type: "required_signatures" }
+      ]
+   }')"
+   upsert_repo_ruleset "${repo}" "${RULESET_NAME_TAG}" "${tag_ruleset}" || true
+
+   ## 8. (DELIBERATELY DISABLED) Vulnerability alerts + Dependabot
+   ##    security updates.
+   ##
+   ##    The personal account is a backup/mirror of work that
+   ##    happens in upstream orgs (Kicksecure, Whonix). Orgs may
+   ##    delete repos for brevity; the personal account preserves
+   ##    history. Enabling Dependabot here would produce duplicate
+   ##    notifications for findings already raised on the upstream
+   ##    org-side repo. Keep these off on the personal mirror.
+   ##
+   ##    If/when this becomes the canonical home of a repo (not a
+   ##    mirror), uncomment.
+   ##
+   ## api_call "${target_user}/${repo}: enable vulnerability alerts" \
+   ##    PUT "/repos/${target_user}/${repo}/vulnerability-alerts" \
+   ##    || true
+   ## api_call "${target_user}/${repo}: enable Dependabot security updates" \
+   ##    PUT "/repos/${target_user}/${repo}/automated-security-fixes" \
+   ##    || true
 }
 
 audit_one() {
