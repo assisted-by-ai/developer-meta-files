@@ -11,8 +11,8 @@
 ## This file sits on top of that and adds:
 ##
 ##   - policy_api_call:  dry-run-aware wrapper that prints
-##                       ok / warn / DRY-RUN labels and optionally
-##                       calls a per-tool record function.
+##                       ok / warn / DRY-RUN labels and bumps the
+##                       caller-scope warn flag on failure.
 ##   - policy_upsert_*_ruleset:
 ##                       idempotent find-by-name then PUT-update or
 ##                       POST-create for org-level and repo-level
@@ -21,6 +21,11 @@
 ##                       payloads (branch ruleset, tag ruleset,
 ##                       fork-PR approval, workflow perms, allowed
 ##                       actions list).
+##   - policy_parse_mode_args / policy_tool_init:
+##                       shared --apply / --dry-run / --audit / -v
+##                       parser plus the post-parse + ghorg_require_deps
+##                       + warn-flag-init boilerplate the apply tools
+##                       all repeat.
 ##
 ## Caller is expected to have these set in scope (bash dynamic
 ## scoping):
@@ -411,4 +416,37 @@ policy_parse_mode_args() {
             ;;
       esac
    done
+}
+
+## Tool-init wrapper around policy_parse_mode_args. Bundles up the
+## boilerplate every dm-github-* policy tool repeats: parse the
+## flags, post-check the positional count and that a mode flag was
+## given, run the dependency pre-flight, and zero the warn-flag.
+##
+## Caller is expected to:
+##   - declare 'mode='', dry_run=0, verbose=0, mode_set=0,
+##     positional=()' before calling
+##   - define a 'show_help' function (used on -h/--help and on
+##     post-check failures)
+##
+## Args:
+##   $1     - expected positional argument count (e.g. 0 for org
+##            tools, 1 for the personal tool)
+##   $2...  - the script's "$@" verbatim
+policy_tool_init() {
+   local expected_positional
+   expected_positional="$1"
+   shift
+
+   policy_parse_mode_args "$@"
+
+   [ "${#positional[@]}" -eq "${expected_positional}" ] \
+      || { show_help >&2; die 64 "expected exactly '${expected_positional}' positional argument(s), got '${#positional[@]}'"; }
+
+   [ "${mode_set}" -eq 1 ] \
+      || { show_help >&2; die 64 'specify exactly one of --apply / --audit / --dry-run'; }
+
+   ghorg_require_deps
+
+   policy_warn_seen=0
 }
