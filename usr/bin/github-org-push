@@ -164,7 +164,8 @@ target_owner="$2"
 [ "${mode_set}" -eq 1 ] \
    || { show_help >&2; die 64 'specify exactly one of --apply / --dry-run'; }
 
-ghorg_require_deps
+## 'git' beyond the base API deps - this tool pushes refs.
+ghorg_require_deps git
 ghorg_validate_name "${target_owner}" user
 ghorg_validate_name "${remote_name}" user
 is_whole_number "${jobs}" \
@@ -321,7 +322,7 @@ main() {
 
   candidate_count="${#candidate_dirs[@]}"
   if [ "${candidate_count}" -eq 0 ]; then
-    printf '%s\n' "no git checkouts found under '${source_dir}'" >&2
+    log notice "no git checkouts found under '${source_dir}'"
     return 0
   fi
 

@@ -164,7 +164,8 @@ dest_dir="${2:-.}"
 [ "${mode_set}" -eq 1 ] \
    || { show_help >&2; die 64 'specify exactly one of --apply / --dry-run'; }
 
-ghorg_require_deps
+## 'git' beyond the base API deps - this tool clones / fetches.
+ghorg_require_deps git
 ghorg_validate_name "${source_org}" user
 is_whole_number "${jobs}" \
   && [ "${jobs}" -ge 1 ] \
@@ -267,7 +268,7 @@ main() {
     | sort --unique)"
 
   if [ -z "${repos}" ]; then
-    printf '%s\n' 'no repos matched.' >&2
+    log notice 'no repos matched.'
     return 0
   fi
 

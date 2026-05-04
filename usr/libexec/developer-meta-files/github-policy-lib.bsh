@@ -307,3 +307,87 @@ policy_actions_selected_allowlist_body() {
       patterns_allowed: []
    }'
 }
+
+## ============================================================================
+## Argument parser
+## ============================================================================
+
+## Shared --apply / --dry-run / --audit / -v|--verbose / -h|--help
+## parser used by dm-github-policy and dm-github-personal-policy.
+## Strict mutual-exclusion guard on the mode flags - typing two of
+## them is a fatal usage error.
+##
+## Sets the following variables in CALLER scope (bash dynamic
+## scoping):
+##
+##   mode='apply'|'audit'   (set when a mode flag is seen)
+##   dry_run=0|1
+##   verbose=0|1
+##   mode_set=0|1           (1 once any mode flag is seen)
+##   positional+=( ... )    non-flag args (and everything after `--`)
+##
+## Caller must:
+##   - declare each of the above before calling, with sane defaults
+##     (mode='', dry_run=0, verbose=0, mode_set=0, positional=())
+##   - define a 'show_help' function (called on -h/--help and
+##     followed by exit 0)
+##   - perform the post-parse "[ ${mode_set} -eq 1 ] || die 64 ..."
+##     and the per-tool positional-count check itself.
+##
+## On -h/--help, calls show_help and exits 0 - that exit terminates
+## the caller's process, which is the intended behavior.
+##
+## Args: the script's "$@" verbatim.
+policy_parse_mode_args() {
+   local arg_safe
+
+   while [ "$#" -gt 0 ]; do
+      case "$1" in
+         --apply)
+            [ "${mode_set}" -eq 0 ] \
+               || die 64 'conflicting mode flags; specify exactly one of --apply / --audit / --dry-run'
+            mode='apply'
+            mode_set=1
+            shift
+            ;;
+         --dry-run)
+            [ "${mode_set}" -eq 0 ] \
+               || die 64 'conflicting mode flags; specify exactly one of --apply / --audit / --dry-run'
+            mode='apply'
+            dry_run=1
+            mode_set=1
+            shift
+            ;;
+         --audit)
+            [ "${mode_set}" -eq 0 ] \
+               || die 64 'conflicting mode flags; specify exactly one of --apply / --audit / --dry-run'
+            mode='audit'
+            mode_set=1
+            shift
+            ;;
+         -v|--verbose)
+            verbose=1
+            shift
+            ;;
+         -h|--help)
+            show_help
+            exit 0
+            ;;
+         --)
+            shift
+            while [ "$#" -gt 0 ]; do
+               positional+=( "$1" )
+               shift
+            done
+            ;;
+         -*)
+            arg_safe="$(ghorg_safe_print 64 "$1")"
+            die 64 "unknown option: '${arg_safe}'"
+            ;;
+         *)
+            positional+=( "$1" )
+            shift
+            ;;
+      esac
+   done
+}

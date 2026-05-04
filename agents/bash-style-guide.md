@@ -58,6 +58,30 @@ shopt -s shift_verbose
 (off by default in bash 5.x).
 * `shift_verbose` makes `shift` log when called past argv end.
 
+## Function definitions
+
+A function definition's closing `}` is followed by ONE blank line
+before the next top-level statement, function definition, or
+top-level comment. Without the blank line the next block runs into
+the function body visually and the function boundary is harder to
+spot in a 600-line file.
+
+```
+foo() {
+   local x
+
+   x="$1"
+   printf '%s\n' "${x}"
+}
+
+bar() {
+   ...
+}
+```
+
+Exception: end of file. A trailing function may end with `}` on the
+final line; no terminating blank required there.
+
 ## Variables
 
 * All variable expansions use `${var}`, never bare `$var`.
@@ -103,6 +127,32 @@ genuinely need shell-escaping), no extra `\n` in the format.
 * Single quotes for string are also acceptable if more readable in
   specific cases such as: `printf '%s\n' '"has" "a" "lot" "quotes"'`
   to avoid escaping `\"`.
+
+### printf vs log: use `log` for ad-hoc messages
+
+`printf '%s\n' "..."` is for the script's *structured output* - lines
+that downstream tools (tests, log scrapers, the operator's eye) match
+against a known prefix. `DRY-RUN: ...`, `ok:   ...`, `warn: ...`,
+`error: ...`, `forked: ...`, `=== summary ===` - those stay as
+`printf` so the prefix is exact.
+
+For an *informational* message that is not part of a contract -
+"no source repos matched.", "no new forks needed.", "skipping X
+because Y" - use `log notice "..."` (or `log info`, `log warn`,
+`log error` as appropriate). The log helpers prefix the script name
+and a level tag (`script.sh [NOTICE]: ...`) which is the right
+context for an ad-hoc message and the wrong context for a structured
+prefix line.
+
+```
+## structured output - test greps for ^ok: and ^warn:
+printf '%s\n' "ok:   ${label} [${status}]"
+printf '%s\n' "warn: '${label}' ['${status}']" >&2
+
+## ad-hoc info - reader wants the script name + level tag
+log notice 'no new forks needed.'
+log warn   "skipping '${repo}': default branch missing"
+```
 
 ## Flags
 
@@ -187,6 +237,25 @@ has github-org-fork \
 The exception is `ci/install-helper-scripts.sh` itself -- helper-
 scripts isn't installed yet at that point, so it falls back to plain
 `command -v`.
+
+### Pre-flight at the top, not scattered
+
+A tool's runtime command dependencies are checked *once*, near the
+top of the script's setup phase, not lazily inside the function that
+happens to need each one. Lazy checks fail halfway through a per-repo
+loop and leave partial state behind; a top-of-file pre-flight bails
+before any mutation runs.
+
+Where a family of tools shares the same deps (e.g. all `github-org-*`
+tools need `curl`, `jq`, `sanitize-string`, and `git`), the lib that
+they all source provides a single helper they call:
+
+```
+ghorg_require_deps git    ## base set + 'git' for tools that exec git
+```
+
+Do not add an inline `has git || die ...` at the per-feature site
+when the shared pre-flight already covers it.
 
 ## Workflow scripts: standalone, not inline
 

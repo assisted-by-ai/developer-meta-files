@@ -46,6 +46,7 @@ dry_run=0
 verbose=0
 mode=''
 mode_set=0
+positional=()
 
 show_help() {
    cat <<'EOF'
@@ -163,45 +164,18 @@ OSSF Scorecard mapping:
 EOF
 }
 
-while [ "$#" -gt 0 ]; do
-   case "$1" in
-      --apply)
-         [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --audit / --dry-run'
-         mode='apply'
-         mode_set=1
-         shift
-         ;;
-      --dry-run)
-         [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --audit / --dry-run'
-         mode='apply'
-         dry_run=1
-         mode_set=1
-         shift
-         ;;
-      --audit)
-         [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --audit / --dry-run'
-         mode='audit'
-         mode_set=1
-         shift
-         ;;
-      -v|--verbose)
-         verbose=1
-         shift
-         ;;
-      -h|--help)
-         show_help
-         exit 0
-         ;;
-      *)
-         arg_safe="$(ghorg_safe_print 64 "$1")"
-         die 64 "unknown argument: '${arg_safe}'"
-         ;;
-   esac
-done
+policy_parse_mode_args "$@"
+
+[ "${#positional[@]}" -eq 0 ] \
+   || die 64 "expected no positional arguments, got '${#positional[@]}'"
 
 [ "${mode_set}" -eq 1 ] \
    || { show_help >&2; die 64 'specify exactly one of --apply / --audit / --dry-run'; }
 
+## Policy tool needs the API base set; no git needed (it never
+## execs git). SC2119 fires because ghorg_require_deps takes "$@" -
+## here we deliberately pass nothing.
+# shellcheck disable=SC2119
 ghorg_require_deps
 
 ## Per-run event counter. main() creates a tempfile; api_record
@@ -760,7 +734,7 @@ main() {
       ## API.
       repos="$(ghorg_list_repos "${org}" 0 0 0 | sort --unique)"
       if [ -z "${repos}" ]; then
-         printf '%s\n' "no repos matched in '${org}'" >&2
+         log notice "no repos matched in '${org}'"
          continue
       fi
 
