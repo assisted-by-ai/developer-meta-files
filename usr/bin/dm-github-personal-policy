@@ -1,0 +1,319 @@
+#!/bin/bash
+
+## Copyright (C) 2026 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+## AI-Assisted
+
+## Apply per-repo lockdown policy to every public repo owned by a
+## given GitHub user account. Mirrors the per-repo subset of
+## dm-github-policy (which targets orgs) for individual user
+## accounts. Idempotent and apply-only - never disables a setting
+## that was already on.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+
+# shellcheck source=/usr/libexec/developer-meta-files/github-org-lib.bsh
+source /usr/libexec/developer-meta-files/github-org-lib.bsh
+# shellcheck source=/usr/libexec/developer-meta-files/github-policy-lib.bsh
+source /usr/libexec/developer-meta-files/github-policy-lib.bsh
+
+## Modes are mutually exclusive; one must be passed explicitly. No
+## implicit default - running this tool without a mode flag is the
+## kind of "intent unclear" footgun we don't want operators to fall
+## into. Empty mode triggers a 'specify --apply / --audit / --dry-run'
+## error after parsing.
+dry_run=0
+verbose=0
+mode=''
+mode_set=0
+target_user=''
+
+show_help() {
+   cat <<'EOF'
+Apply per-repo lockdown policy to every public repo owned by a
+GitHub user account. Designed for hardening a personal account
+against malicious fork PRs that could otherwise burn Actions minutes.
+
+Usage (one mode flag is required - no implicit default):
+  dm-github-personal-policy <username> --apply     ## apply
+  dm-github-personal-policy <username> --dry-run   ## report planned changes
+  dm-github-personal-policy <username> --audit     ## read-only inspection
+  dm-github-personal-policy --help
+
+Settings applied per repo:
+  - Fork-PR contributor approval = all_external_contributors
+    (require approval before fork PRs run any workflow)
+  - Default workflow GITHUB_TOKEN permissions = read; cannot approve PRs
+  - Allowed Actions = selected (github-owned + verified creators)
+  - Wiki / Projects / Discussions = disabled (cut abuse vectors)
+  - Secret scanning + push protection = enabled
+  - Pages site = deleted if present (one-shot, not a permanent gate)
+  - Branch ruleset on default branch: block force-push, block delete,
+    require signed commits (bypass_actors=[] - even the owner can't
+    override)
+  - Tag ruleset on all tags: block delete, block re-pointing, require
+    signed tags
+
+Deliberately NOT applied (commented out in source):
+  - Vulnerability alerts / Dependabot security updates: this account
+    is a backup/mirror of org-side repos; enabling here would
+    duplicate notifications. Uncomment if a repo becomes canonical
+    here.
+
+Repos in scope:
+  - Public, non-archived, non-fork repos owned by <username>.
+    Forks are EXCLUDED by default; archived repos are read-only and
+    return HTTP 403 on PATCH/PUT regardless. Private repos are
+    excluded because external (untrusted) contributors cannot open PRs
+    against them.
+
+Auth:
+  ${GITHUB_TOKEN} env var, or chmod-600 ~/.config/github-token.
+  Token needs 'repo' (classic) or 'Administration: write' (fine-grained).
+EOF
+}
+
+## Collect positional args while continuing to parse flags after
+## them. Naive 'break' on first non-flag would let an operator type
+## 'dm-github-personal-policy <user> --dry-run' and have the
+## --dry-run silently ignored (mutating mode), which is exactly the
+## form documented in --help. Codex P1 review caught this.
+positional=()
+while [ "$#" -gt 0 ]; do
+   case "$1" in
+      --apply)
+         [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --audit / --dry-run'
+         mode='apply'
+         mode_set=1
+         shift
+         ;;
+      --dry-run)
+         [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --audit / --dry-run'
+         mode='apply'
+         dry_run=1
+         mode_set=1
+         shift
+         ;;
+      --audit)
+         [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --audit / --dry-run'
+         mode='audit'
+         mode_set=1
+         shift
+         ;;
+      -v|--verbose)
+         verbose=1
+         shift
+         ;;
+      -h|--help)
+         show_help
+         exit 0
+         ;;
+      --)
+         shift
+         while [ "$#" -gt 0 ]; do
+            positional+=( "$1" )
+            shift
+         done
+         ;;
+      -*)
+         die 64 "unknown option: '$1'"
+         ;;
+      *)
+         positional+=( "$1" )
+         shift
+         ;;
+   esac
+done
+
+[ "${#positional[@]}" -eq 1 ] \
+   || { show_help >&2; die 64 "expected exactly 1 positional argument (<username>), got '${#positional[@]}'"; }
+
+[ "${mode_set}" -eq 1 ] \
+   || { show_help >&2; die 64 'specify exactly one of --apply / --audit / --dry-run'; }
+
+target_user="${positional[0]}"
+
+ghorg_require_deps
+ghorg_validate_name "${target_user}" user
+
+readonly RULESET_NAME_BRANCH='dm-github-personal-policy default-branch protection'
+readonly RULESET_NAME_TAG='dm-github-personal-policy tag protection'
+
+## --verbose suppresses the 'ok:' line otherwise printed by
+## policy_api_call. Apply runs without --verbose are quiet on success.
+[ "${verbose}" = '1' ] || POLICY_QUIET_OK=1
+
+apply_repo_policy() {
+   local repo
+
+   repo="$1"
+
+   ## 1. Fork-PR contributor approval = all_external_contributors.
+   policy_api_call "${target_user}/${repo}: fork-PR approval=all_external_contributors" \
+      PUT "/repos/${target_user}/${repo}/actions/permissions/fork-pr-contributor-approval" \
+      "$(policy_fork_pr_approval_body)" \
+      || true
+
+   ## 2. Default workflow GITHUB_TOKEN permissions = read; cannot approve PRs.
+   policy_api_call "${target_user}/${repo}: workflow GITHUB_TOKEN read-only" \
+      PUT "/repos/${target_user}/${repo}/actions/permissions/workflow" \
+      "$(policy_workflow_perms_body)" \
+      || true
+
+   ## 3. Allowed Actions = selected (github-owned + verified creators).
+   ##    Two-step: enable Actions + set allowed=selected, then set the
+   ##    list to github-owned + verified. Repo-level body schema differs
+   ##    from the org endpoint: 'enabled' (bool) instead of
+   ##    'enabled_repositories' (string).
+   policy_api_call "${target_user}/${repo}: actions enabled=true, allowed=selected" \
+      PUT "/repos/${target_user}/${repo}/actions/permissions" \
+      "$(jq -n -- '{ enabled: true, allowed_actions: "selected" }')" \
+      || true
+   policy_api_call "${target_user}/${repo}: selected-actions allow-list" \
+      PUT "/repos/${target_user}/${repo}/actions/permissions/selected-actions" \
+      "$(policy_actions_selected_allowlist_body)" \
+      || true
+
+   ## 4. Repo settings + secret-scanning + push-protection in one PATCH.
+   ##    - has_wiki=false, has_projects=false, has_discussions=false:
+   ##      cuts wiki/projects/discussions abuse vectors. has_issues is
+   ##      left untouched (defaults on; useful for a backup mirror).
+   ##    - secret_scanning + secret_scanning_push_protection: enable
+   ##      both so accidental secrets are flagged AND blocked at push
+   ##      time. Free for public repos; requires Advanced Security on
+   ##      private repos. We're scoping to public-only anyway.
+   policy_api_call "${target_user}/${repo}: settings (wiki/projects/discussions off, secret-scan on)" \
+      PATCH "/repos/${target_user}/${repo}" \
+      "$(jq -n -- '{
+         has_wiki: false,
+         has_projects: false,
+         has_discussions: false,
+         security_and_analysis: {
+            secret_scanning: { status: "enabled" },
+            secret_scanning_push_protection: { status: "enabled" }
+         }
+      }')" \
+      || true
+
+   ## 5. Disable GitHub Pages site if any. The DELETE endpoint is
+   ##    idempotent in spirit: 204 if a site existed and was removed,
+   ##    404 if no site (treated as warn but harmless). Not a
+   ##    permanent gate - any future Pages workflow run will recreate
+   ##    the site.
+   policy_api_call "${target_user}/${repo}: delete Pages site (if any)" \
+      DELETE "/repos/${target_user}/${repo}/pages" \
+      || true
+
+   ## 6. Branch ruleset on the default branch: block force-push, block
+   ##    deletion, require signed commits. bypass_actors=[] - no one,
+   ##    including the owner, can override.
+   policy_upsert_repo_ruleset "${target_user}" "${repo}" \
+      "${RULESET_NAME_BRANCH}" \
+      "$(policy_branch_ruleset_body "${RULESET_NAME_BRANCH}" repo)" \
+      || true
+
+   ## 7. Tag ruleset for all tags: block deletion, block re-pointing,
+   ##    require signed tags. Without this, push rights would let the
+   ##    operator (or a compromised credential) move release tags.
+   policy_upsert_repo_ruleset "${target_user}" "${repo}" \
+      "${RULESET_NAME_TAG}" \
+      "$(policy_tag_ruleset_body "${RULESET_NAME_TAG}" repo)" \
+      || true
+
+   ## 8. (DELIBERATELY DISABLED) Vulnerability alerts + Dependabot
+   ##    security updates.
+   ##
+   ##    The personal account is a backup/mirror of work that
+   ##    happens in upstream orgs (Kicksecure, Whonix). Orgs may
+   ##    delete repos for brevity; the personal account preserves
+   ##    history. Enabling Dependabot here would produce duplicate
+   ##    notifications for findings already raised on the upstream
+   ##    org-side repo. Keep these off on the personal mirror.
+   ##
+   ##    If/when this becomes the canonical home of a repo (not a
+   ##    mirror), uncomment.
+   ##
+   ## policy_api_call "${target_user}/${repo}: enable vulnerability alerts" \
+   ##    PUT "/repos/${target_user}/${repo}/vulnerability-alerts" \
+   ##    || true
+   ## policy_api_call "${target_user}/${repo}: enable Dependabot security updates" \
+   ##    PUT "/repos/${target_user}/${repo}/automated-security-fixes" \
+   ##    || true
+}
+
+audit_one() {
+   local repo result status body safe_repo
+   local fork_approval workflow_perms allowed_actions
+   local safe_fork_approval safe_workflow_perms safe_allowed_actions
+
+   repo="$1"
+   safe_repo="$(ghorg_safe_print "${GHORG_MAX_REPO_NAME_LEN}" "${repo}")"
+
+   printf '%s\n' "${target_user}/${safe_repo}:"
+
+   result="$(ghorg_api GET \
+      "/repos/${target_user}/${repo}/actions/permissions/fork-pr-contributor-approval")" \
+      || true
+   status="$(ghorg_status_of "${result}")"
+   if [ "${status}" = '200' ]; then
+      body="$(ghorg_body_of "${result}")"
+      fork_approval="$(printf '%s' "${body}" | jq --raw-output -- '.approval_policy // "?"')"
+      safe_fork_approval="$(ghorg_safe_print 64 "${fork_approval}")"
+      printf '%s\n' "  fork-PR approval: ${safe_fork_approval}"
+   else
+      printf '%s\n' "  fork-PR approval: HTTP '${status}'"
+   fi
+
+   result="$(ghorg_api GET "/repos/${target_user}/${repo}/actions/permissions/workflow")" \
+      || true
+   status="$(ghorg_status_of "${result}")"
+   if [ "${status}" = '200' ]; then
+      body="$(ghorg_body_of "${result}")"
+      workflow_perms="$(printf '%s' "${body}" | jq --raw-output -- '"default=" + (.default_workflow_permissions // "?") + ", can_approve_PRs=" + ((.can_approve_pull_request_reviews // false) | tostring)')"
+      safe_workflow_perms="$(ghorg_safe_print 128 "${workflow_perms}")"
+      printf '%s\n' "  workflow GITHUB_TOKEN: ${safe_workflow_perms}"
+   else
+      printf '%s\n' "  workflow GITHUB_TOKEN: HTTP '${status}'"
+   fi
+
+   result="$(ghorg_api GET "/repos/${target_user}/${repo}/actions/permissions")" \
+      || true
+   status="$(ghorg_status_of "${result}")"
+   if [ "${status}" = '200' ]; then
+      body="$(ghorg_body_of "${result}")"
+      allowed_actions="$(printf '%s' "${body}" | jq --raw-output -- '"enabled=" + ((.enabled // false) | tostring) + ", allowed_actions=" + (.allowed_actions // "?")')"
+      safe_allowed_actions="$(ghorg_safe_print 128 "${allowed_actions}")"
+      printf '%s\n' "  actions: ${safe_allowed_actions}"
+   else
+      printf '%s\n' "  actions: HTTP '${status}'"
+   fi
+}
+
+repos="$(ghorg_list_repos "${target_user}" 0 0 0 \
+   | sort --unique)"
+
+if [ -z "${repos}" ]; then
+   log notice "no public non-archived non-fork repos for '${target_user}'"
+   exit 0
+fi
+
+case "${mode}" in
+   apply)
+      while IFS= read -r repo; do
+         [ -z "${repo}" ] && continue
+         apply_repo_policy "${repo}"
+      done <<< "${repos}"
+      ;;
+   audit)
+      while IFS= read -r repo; do
+         [ -z "${repo}" ] && continue
+         audit_one "${repo}" || true
+      done <<< "${repos}"
+      ;;
+esac

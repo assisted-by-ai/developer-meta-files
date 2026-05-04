@@ -39,7 +39,10 @@ exclude_re=''
 shallow=0
 url_scheme='ssh'
 jobs=4
+## Mode is mutually exclusive; one of --apply / --dry-run must be
+## passed explicitly. No implicit default.
 dry_run=0
+mode_set=0
 verbose=0
 
 show_help() {
@@ -48,8 +51,9 @@ Clone or update every selected repo of a GitHub user/organization
 into a local directory tree. Idempotent - re-running fetches and
 fast-forwards each existing clone, never merging or rebasing.
 
-Usage:
-  github-org-clone [OPTIONS] <source-org> [<dest-dir>]
+Usage (one mode flag is required - no implicit default):
+  github-org-clone --apply [OPTIONS] <source-org> [<dest-dir>]
+  github-org-clone --dry-run [OPTIONS] <source-org> [<dest-dir>]
 
 Layout:
   <dest-dir>/<repo-name>/      ## one git checkout per repo, flat
@@ -64,6 +68,7 @@ Options:
   --ssh                use git@github.com:... URLs (default)
   --https              use https://github.com/... URLs
   --jobs N             parallel clones/fetches (default: 4)
+  --apply              perform clones/updates (mutates local fs)
   --dry-run            report planned actions, do nothing
   -v, --verbose        print each git command
   -h, --help           show this help and exit
@@ -116,8 +121,15 @@ while [ "$#" -gt 0 ]; do
       jobs="$2"
       shift 2
       ;;
+    --apply)
+      [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --dry-run'
+      mode_set=1
+      shift
+      ;;
     --dry-run)
+      [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --dry-run'
       dry_run=1
+      mode_set=1
       shift
       ;;
     -v|--verbose)
@@ -148,6 +160,9 @@ fi
 
 source_org="$1"
 dest_dir="${2:-.}"
+
+[ "${mode_set}" -eq 1 ] \
+   || { show_help >&2; die 64 'specify exactly one of --apply / --dry-run'; }
 
 ghorg_require_deps
 ghorg_validate_name "${source_org}" user

@@ -23,6 +23,13 @@ source /usr/libexec/developer-meta-files/github-org-lib.bsh
 include_private=0
 include_archived=0
 include_forks=0
+## --include / --exclude can each be passed multiple times; OR-combine
+## the patterns so a wrapper-supplied filter (e.g. dm-github-fork-sync's
+## per-source SOURCE_EXCLUDE_RE) is not silently overridden by a
+## user-supplied --exclude on the same command line. Stored as arrays
+## during parsing; OR-combined into a single regex below.
+include_re_list=()
+exclude_re_list=()
 include_re=''
 exclude_re=''
 disable_issues=0
@@ -30,7 +37,11 @@ disable_wiki=0
 disable_projects=0
 actions_state='leave'    ## enable | disable | leave
 workflow_perms='leave'   ## read | write | leave
+sync_branches=0
+## Mode is mutually exclusive; one of --apply / --dry-run must be
+## passed explicitly. No implicit default.
 dry_run=0
+mode_set=0
 verbose=0
 
 show_help() {
@@ -41,10 +52,13 @@ ones are created. Optional flags also (re-)apply per-repo settings on
 the target side, so the script doubles as a drift corrector on every
 run.
 
-Usage:
-  github-org-fork [OPTIONS] <source-owner> <target-owner>
+Usage (one mode flag is required - no implicit default):
+  github-org-fork --apply   [OPTIONS] <source-owner> <target-owner>
+  github-org-fork --dry-run [OPTIONS] <source-owner> <target-owner>
 
 Options:
+  --apply              perform fork creation + per-repo configuration
+  --dry-run            report planned actions, do nothing
   --include-private    include private repos       (default: skip)
   --include-archived   include archived repos      (default: skip)
   --include-forks      include forks of other repos (default: skip)
@@ -59,7 +73,10 @@ Options:
   --workflow-perms {read|write|leave}
                        set default GITHUB_TOKEN permissions in target
                        workflows (default: leave)
-  --dry-run            report planned actions, do nothing
+  --sync-branches      after fork-create + configure, fast-forward each
+                       target repo's default branch from upstream via
+                       POST /repos/{owner}/{repo}/merge-upstream. 409
+                       (diverged) and 422 (branch missing) become warns.
   -v, --verbose        print each API call's effect
   -h, --help           show this help and exit
 
@@ -92,12 +109,12 @@ while [ "$#" -gt 0 ]; do
       ;;
     --include)
       [ "$#" -ge 2 ] || die 64 "missing value for --include"
-      include_re="$2"
+      include_re_list+=( "$2" )
       shift 2
       ;;
     --exclude)
       [ "$#" -ge 2 ] || die 64 "missing value for --exclude"
-      exclude_re="$2"
+      exclude_re_list+=( "$2" )
       shift 2
       ;;
     --disable-issues)
@@ -136,8 +153,19 @@ while [ "$#" -gt 0 ]; do
       esac
       shift 2
       ;;
+    --sync-branches)
+      sync_branches=1
+      shift
+      ;;
+    --apply)
+      [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --dry-run'
+      mode_set=1
+      shift
+      ;;
     --dry-run)
+      [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --dry-run'
       dry_run=1
+      mode_set=1
       shift
       ;;
     -v|--verbose)
@@ -168,6 +196,33 @@ fi
 
 source_owner="$1"
 target_owner="$2"
+
+[ "${mode_set}" -eq 1 ] \
+   || { show_help >&2; die 64 'specify exactly one of --apply / --dry-run'; }
+
+## OR-combine multi-flag --include / --exclude lists into single
+## regexes (extended) consumed by ghorg_filter_names below. Each
+## individual pattern wrapped in (...) so alternation between user-
+## supplied and wrapper-supplied filters cannot be unbalanced by
+## bare '|' inside one of them.
+combine_alt() {
+  local -n list_ref="$1"
+  local item out=''
+  for item in "${list_ref[@]}"; do
+    ## Empty pattern is treated as "no filter at this slot". A wrapper
+    ## that forwards an optional regex with --exclude "${EXCLUDE_RE:-}"
+    ## should not silently match every repo via 'grep -v -E ()'.
+    [ -z "${item}" ] && continue
+    if [ -z "${out}" ]; then
+      out="(${item})"
+    else
+      out="${out}|(${item})"
+    fi
+  done
+  printf '%s' "${out}"
+}
+include_re="$(combine_alt include_re_list)"
+exclude_re="$(combine_alt exclude_re_list)"
 
 ghorg_require_deps
 ghorg_validate_name "${source_owner}" user
@@ -306,6 +361,95 @@ configure_one() {
   fi
 }
 
+## Fast-forward target_owner/repo's default branch from upstream via
+## POST /repos/{owner}/{repo}/merge-upstream. The merge-upstream
+## endpoint:
+##   200 - synced (or already up-to-date); .merge_type tells the form.
+##   409 - upstream and fork have diverged in a way merge-upstream
+##         cannot fast-forward (someone pushed to the mirror directly).
+##   422 - default branch missing on either side.
+## We accept 200 and downgrade 409/422 to warn so a single repo's
+## divergence does not abort the run.
+##
+## Default branch is looked up via /repos/{owner}/{repo}.default_branch.
+## Most are 'master', some are 'main' or other names; do not hard-code.
+sync_one() {
+  local repo result status info default_branch body safe_repo safe_branch
+  local merge_type merged_commits safe_merge_type safe_merged_commits
+
+  repo="$1"
+
+  if [ "${dry_run}" = '1' ]; then
+    log notice "DRY-RUN: sync-branches ${target_owner}/${repo}"
+    return 0
+  fi
+
+  ## Need the default branch name. Fetch the repo metadata once.
+  info="$(ghorg_api GET "/repos/${target_owner}/${repo}")" || return 1
+  status="$(ghorg_status_of "${info}")"
+  if [ "${status}" != '200' ]; then
+    log warn "sync-branches: lookup '${target_owner}/${repo}': HTTP '${status}'"
+    return 0
+  fi
+  default_branch="$(ghorg_body_of "${info}" | jq -r -- '.default_branch')"
+  if [ -z "${default_branch}" ] || [ "${default_branch}" = 'null' ]; then
+    log warn "sync-branches: '${target_owner}/${repo}' has no default branch"
+    return 0
+  fi
+  ## Default branch is API-derived; passes into the request body
+  ## (jq escapes safely) and into display via log/printf (sanitized
+  ## via ghorg_safe_print before output). The remaining validation
+  ## here is defense-in-depth.
+  ##
+  ## Use git's own ref-name validator instead of an inline allowlist.
+  ## Branch names can legitimately contain characters beyond a simple
+  ## class (e.g. '+'), and any homegrown regex tends to false-positive
+  ## on edge cases.
+  ##
+  ## 'git check-ref-format' does not support '--' as an end-of-options
+  ## separator on any of its forms (verified against git 2.43); both
+  ## '--branch -- <X>' and '-- <refname>' return usage error 129 even
+  ## for valid names. Validate as a full refname instead, prefixing
+  ## 'refs/heads/' ourselves. The prefix ensures the resulting argv
+  ## element never starts with '-', so the missing '--' end-of-options
+  ## doesn't create a shell-level arg-injection path from a hostile
+  ## API response.
+  if ! git check-ref-format "refs/heads/${default_branch}" >/dev/null 2>&1; then
+    log warn "sync-branches: '${target_owner}/${repo}' default branch invalid: '$(ghorg_safe_print 64 "${default_branch}")'"
+    return 0
+  fi
+
+  body="$(jq -n --arg b "${default_branch}" -- '{branch: $b}')"
+  result="$(ghorg_api POST \
+    "/repos/${target_owner}/${repo}/merge-upstream" "${body}")" || return 1
+  status="$(ghorg_status_of "${result}")"
+  safe_repo="$(ghorg_safe_print "${GHORG_MAX_REPO_NAME_LEN}" "${repo}")"
+  safe_branch="$(ghorg_safe_print "${GHORG_MAX_REPO_NAME_LEN}" "${default_branch}")"
+  case "${status}" in
+    200)
+      merge_type="$(ghorg_body_of "${result}" | jq -r -- '.merge_type')"
+      merged_commits="$(ghorg_body_of "${result}" | jq -r -- '.merged_commits // 0')"
+      ## Both flow into a 'log notice' display sink; sanitize per the
+      ## "API-derived strings into printf" rule. merged_commits should
+      ## be numeric, but a hostile/replayed GHORG_API endpoint can
+      ## return arbitrary bytes and we still want safe display.
+      safe_merge_type="$(ghorg_safe_print 32 "${merge_type}")"
+      safe_merged_commits="$(ghorg_safe_print 16 "${merged_commits}")"
+      [ "${verbose}" = '1' ] && log notice \
+        "synced: ${target_owner}/${safe_repo}/${safe_branch} merge_type='${safe_merge_type}' commits='${safe_merged_commits}'"
+      ;;
+    409)
+      log warn "sync-branches: '${target_owner}/${safe_repo}/${safe_branch}' diverged from upstream (HTTP 409)"
+      ;;
+    422)
+      log warn "sync-branches: '${target_owner}/${safe_repo}/${safe_branch}' branch missing on upstream (HTTP 422)"
+      ;;
+    *)
+      log warn "sync-branches: '${target_owner}/${safe_repo}/${safe_branch}': HTTP '${status}'"
+      ;;
+  esac
+}
+
 ## Populates the associative array named in $1 with one key per
 ## newline-separated repo name in $2. Empty lines skipped.
 fork_main_build_repo_set() {
@@ -394,6 +538,17 @@ main() {
     for repo_name in "${to_configure[@]}"; do
       check_collision "${repo_name}" || true
       configure_one "${repo_name}" || true
+    done
+  fi
+
+  ## Branch sync (--sync-branches). Same best-effort guarantee.
+  ## sync_one calls 'git check-ref-format' to validate API-derived
+  ## default branch names; check git up-front so a missing binary
+  ## fails loudly instead of silently rejecting every repo.
+  if [ "${sync_branches}" = '1' ] && [ "${#to_configure[@]}" -gt 0 ]; then
+    has git || die 1 "'git' not on PATH (required by --sync-branches)"
+    for repo_name in "${to_configure[@]}"; do
+      sync_one "${repo_name}" || true
     done
   fi
 }

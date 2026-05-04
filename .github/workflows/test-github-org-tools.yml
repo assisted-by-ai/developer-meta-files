@@ -25,16 +25,20 @@ on:
       ## Only run when github-related code or CI assets change.
       - 'usr/bin/github-org-*'
       - 'usr/bin/dm-github-policy'
-      - 'usr/bin/dm-fork-sync'
+      - 'usr/bin/dm-github-personal-policy'
+      - 'usr/bin/dm-github-fork-sync'
       - 'usr/libexec/developer-meta-files/github-org-lib.bsh'
+      - 'usr/libexec/developer-meta-files/github-policy-lib.bsh'
       - 'ci/**'
       - '.github/workflows/test-github-org-tools.yml'
   pull_request:
     paths:
       - 'usr/bin/github-org-*'
       - 'usr/bin/dm-github-policy'
-      - 'usr/bin/dm-fork-sync'
+      - 'usr/bin/dm-github-personal-policy'
+      - 'usr/bin/dm-github-fork-sync'
       - 'usr/libexec/developer-meta-files/github-org-lib.bsh'
+      - 'usr/libexec/developer-meta-files/github-policy-lib.bsh'
       - 'ci/**'
       - '.github/workflows/test-github-org-tools.yml'
   workflow_dispatch:

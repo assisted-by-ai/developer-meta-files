@@ -31,25 +31,16 @@ source /usr/libexec/developer-meta-files/github-org-lib.bsh
 
 ghorg_require_deps
 
-## /user identifies the auth principal; should match an Owner of any
-## org the caller plans to mutate.
-user_result="$(ghorg_api GET '/user')" || die 1 'token rejected by /user'
+## /user via the lib's existing helper. ghorg_authenticated_user
+## already does the GET, status check, .login extraction, and
+## ghorg_validate_name on the result. Reusing it here avoids
+## duplicating that code path.
+login="$(ghorg_authenticated_user)" || die 1 'token rejected by /user'
 
-user_status="$(ghorg_status_of "${user_result}")"
-
-[ "${user_status}" = '200' ] || die 1 "/user returned HTTP '${user_status}'"
-
-user_body="$(ghorg_body_of "${user_result}")"
-
-login_raw="$(printf '%s' "${user_body}" | jq -r -- '.login')"
-
-[ -n "${login_raw}" ] && [ "${login_raw}" != 'null' ] || die 1 'response missing .login'
-
-login="$(ghorg_safe_print "${GHORG_MAX_USER_LOGIN_LEN}" "${login_raw}")"
-
-## /rate_limit shows budget across resources. .resources.core is the
-## main bucket dm-github-fork-sync / dm-github-policy consume.
-rl_result="$(ghorg_api GET '/rate_limit')" || die 1 'rate_limit endpoint failed'
+## /rate_limit budget. Distinct purpose from /user: /user proves the
+## token is valid, /rate_limit shows how much budget we have for the
+## upcoming dm-github-fork-sync / dm-github-policy work.
+rl_result="$(ghorg_api GET '/rate_limit')" || die 1 '/rate_limit failed'
 
 rl_status="$(ghorg_status_of "${rl_result}")"
 

@@ -27,7 +27,10 @@ exclude_re=''
 url_scheme='ssh'
 jobs=4
 create_missing=0
+## Mode is mutually exclusive; one of --apply / --dry-run must be
+## passed explicitly. No implicit default.
 dry_run=0
+mode_set=0
 verbose=0
 
 show_help() {
@@ -37,8 +40,9 @@ tags) to a same-named repo in <target-owner> on GitHub. Useful as
 the third step of a clone -> fork -> push pipeline that keeps a
 mirror in sync with the upstream you cloned.
 
-Usage:
-  github-org-push [OPTIONS] <source-dir> <target-owner>
+Usage (one mode flag is required - no implicit default):
+  github-org-push --apply   [OPTIONS] <source-dir> <target-owner>
+  github-org-push --dry-run [OPTIONS] <source-dir> <target-owner>
 
 Layout:
   Expects <source-dir>/<repo-name>/.git, matching github-org-clone's
@@ -56,6 +60,7 @@ Options:
   --https              use https://github.com/... URLs
   --jobs N             parallel pushes (default: 4)
   --create-missing     reserved; not implemented
+  --apply              perform pushes
   --dry-run            report planned actions, do nothing
   -v, --verbose        print each git command
   -h, --help           show this help and exit
@@ -115,8 +120,15 @@ while [ "$#" -gt 0 ]; do
       create_missing=1
       shift
       ;;
+    --apply)
+      [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --dry-run'
+      mode_set=1
+      shift
+      ;;
     --dry-run)
+      [ "${mode_set}" -eq 0 ] || die 64 'conflicting mode flags; specify exactly one of --apply / --dry-run'
       dry_run=1
+      mode_set=1
       shift
       ;;
     -v|--verbose)
@@ -148,6 +160,9 @@ fi
 source_dir="$1"
 target_owner="$2"
 [ -z "${remote_name}" ] && remote_name="${target_owner}"
+
+[ "${mode_set}" -eq 1 ] \
+   || { show_help >&2; die 64 'specify exactly one of --apply / --dry-run'; }
 
 ghorg_require_deps
 ghorg_validate_name "${target_owner}" user
