@@ -35,10 +35,8 @@ FIXTURE_DIR="$(cd -- "${SCRIPT_DIR}/../fixtures" && pwd)"
 export GHORG_MOCK=1
 export GHORG_MOCK_DIR="${FIXTURE_DIR}"
 
-set +o errexit
-out="$(dm-github-personal-policy org-ai-assisted --dry-run 2>&1)"
-rc=$?
-set -o errexit
+rc=0
+out="$(dm-github-personal-policy org-ai-assisted --dry-run 2>&1)" || rc=$?
 
 fail=0
 if [ "${rc}" -eq 0 ]; then
