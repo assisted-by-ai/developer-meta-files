@@ -122,7 +122,12 @@ _policy_upsert_ruleset() {
    body="$4"
 
    if [ "${dry_run}" = '1' ]; then
-      printf '%s\n' "DRY-RUN: ${scope_label}: upsert ruleset '${name}'"
+      ## Format must match the dry-run line the previous in-tool
+      ## upsert_org_ruleset / upsert_repo_ruleset printed - the
+      ## ci/tests/test_dm_dryrun.sh test does a fixed-string grep
+      ## against "DRY-RUN: ${scope}: upsert ruleset ${name}" (no
+      ## quotes around the name). Don't add quoting here.
+      printf '%s\n' "DRY-RUN: ${scope_label}: upsert ruleset ${name}"
       [ -n "${POLICY_RECORD_FN:-}" ] && "${POLICY_RECORD_FN}" dry
       return 0
    fi
