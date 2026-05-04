@@ -172,33 +172,16 @@ policy_parse_mode_args "$@"
 [ "${mode_set}" -eq 1 ] \
    || { show_help >&2; die 64 'specify exactly one of --apply / --audit / --dry-run'; }
 
-## Policy tool needs the API base set; no git needed (it never
-## execs git). SC2119 fires because ghorg_require_deps takes "$@" -
-## here we deliberately pass nothing.
-# shellcheck disable=SC2119
 ghorg_require_deps
 
-## Per-run event counter. main() creates a tempfile; api_record
-## appends one word per event (ok | warn | dry | skip) and main()
-## sums them at the end. Tempfile rather than a bash variable because
-## the per-repo loop backgrounds children with `&`; PIPE_BUF (4096B on
-## Linux) makes our 4-5 byte appends atomic across concurrent writers.
-api_counter_file=''
-
-api_record() {
-   [ -n "${api_counter_file}" ] || return 0
-   printf '%s\n' "$1" >> "${api_counter_file}"
-}
-
-record_skip() {
-   api_record skip
-}
-
-## github-policy-lib.bsh's policy_api_call invokes ${POLICY_RECORD_FN}
-## per event so this tool's per-run tally still gets the ok/warn/dry
-## counts. The lib's wrapper replaces the local api_call we used to
-## carry here.
-POLICY_RECORD_FN='api_record'
+## main() creates a tempfile and exports its path as POLICY_WARN_FILE
+## so the lib's policy_api_call appends one byte to it on every warn
+## (across the org-level apply path AND the per-repo backgrounded
+## loop). main() then tests '[ -s "${POLICY_WARN_FILE}" ]' to learn
+## "did at least one warn happen anywhere", which is the only signal
+## a CI / cron caller needs - exit non-zero on warn, zero otherwise.
+## No per-status counters, no summary printout: the operator can read
+## the log lines above to see what specifically went wrong.
 
 ## Idempotent code-security-configuration upsert + attach + default.
 ## Replaces the deprecated PATCH /orgs/{org} security-defaults fields
@@ -234,25 +217,21 @@ apply_code_security_config() {
    }')"
 
    if [ "${dry_run}" = '1' ]; then
-      printf '%s\n' "\
-DRY-RUN: ${org}: upsert code-security configuration ${CODE_SEC_CONFIG_NAME}
-DRY-RUN: ${org}: attach code-security configuration scope=all
-DRY-RUN: ${org}: set code-security configuration default_for_new_repos=all"
-      api_record dry; api_record dry; api_record dry
+      log notice "DRY-RUN: ${org}: upsert code-security configuration ${CODE_SEC_CONFIG_NAME}"
+      log notice "DRY-RUN: ${org}: attach code-security configuration scope=all"
+      log notice "DRY-RUN: ${org}: set code-security configuration default_for_new_repos=all"
       return 0
    fi
 
    ## Find existing configuration by name.
    list_result="$(ghorg_api GET "/orgs/${org}/code-security/configurations?per_page=100")" \
-      || { api_record warn; return 1; }
+      || { _policy_mark_warn; return 1; }
    list_status="$(ghorg_status_of "${list_result}")"
    if [ "${list_status}" != '200' ]; then
       list_body="$(ghorg_body_of "${list_result}")"
       list_safe_body="$(ghorg_safe_print 512 "${list_body}")"
-      printf '%s\n' "\
-warn: ${org}: list code-security configurations [${list_status}]
-${list_safe_body}" >&2
-      api_record warn
+      log warn "${org}: list code-security configurations [${list_status}]: ${list_safe_body}"
+      _policy_mark_warn
       return 1
    fi
    existing_id="$(ghorg_body_of "${list_result}" \
@@ -265,9 +244,8 @@ ${list_safe_body}" >&2
       if ! [[ "${existing_id}" =~ ^[0-9]+$ ]] || \
          [ "${#existing_id}" -gt "${GHORG_MAX_ID_LEN}" ]; then
          safe_id="$(ghorg_safe_print 32 "${existing_id}")"
-         printf '%s\n' \
-            "warn: '${org}': code-security config id '${safe_id}' not a valid numeric id" >&2
-         api_record warn
+         log warn "'${org}': code-security config id '${safe_id}' not a valid numeric id"
+         _policy_mark_warn
          return 1
       fi
       policy_api_call "${org}: update code-security configuration id=${existing_id}" \
@@ -277,22 +255,18 @@ ${list_safe_body}" >&2
       ## POST returns the new config object including its id; we need
       ## the id for the attach + default calls.
       create_result="$(ghorg_api POST "/orgs/${org}/code-security/configurations" "${config_body}")" \
-         || { api_record warn; return 1; }
+         || { _policy_mark_warn; return 1; }
       create_status="$(ghorg_status_of "${create_result}")"
       case "${create_status}" in
          200|201)
             existing_id="$(ghorg_body_of "${create_result}" | jq -r -- '.id')"
-            printf '%s\n' \
-               "ok:   ${org}: created code-security configuration id=${existing_id} [${create_status}]"
-            api_record ok
+            log notice "ok: ${org}: created code-security configuration id=${existing_id} [${create_status}]"
             ;;
          *)
             create_body="$(ghorg_body_of "${create_result}")"
             create_safe_body="$(ghorg_safe_print 512 "${create_body}")"
-            printf '%s\n' "\
-warn: ${org}: create code-security configuration [${create_status}]
-${create_safe_body}" >&2
-            api_record warn
+            log warn "${org}: create code-security configuration [${create_status}]: ${create_safe_body}"
+            _policy_mark_warn
             return 1
             ;;
       esac
@@ -321,8 +295,7 @@ apply_org_policy() {
 
    org="$1"
 
-   printf '%s\n' ""
-   printf '%s\n' "=== org policy: ${org} ==="
+   log notice "=== org policy: ${org} ==="
 
    ## 1. Fork-PR contributor approval = all_external_contributors.
    policy_api_call "${org}: fork-PR approval=all_external_contributors" \
@@ -382,10 +355,7 @@ apply_org_policy() {
    ##     enroll. GitHub is also rolling out 2FA platform-wide as a
    ##     mandatory account requirement, so the org-level toggle just
    ##     front-runs that. Print a skip with the UI URL.
-   printf '%s\n' "\
-skip: ${org}: 2FA enforcement must be set via UI - see
-       https://github.com/organizations/${org}/settings/security"
-   record_skip
+   log notice "skip: ${org}: 2FA enforcement must be set via UI - see https://github.com/organizations/${org}/settings/security"
 
    ## 5+6. Code security via the Code Security Configurations API
    ##      (replaces deprecated PATCH /orgs/{org} security-defaults
@@ -415,18 +385,11 @@ skip: ${org}: 2FA enforcement must be set via UI - see
    ## 9. PAT policy toggles (UI-only). REST exposes GETs for pending
    ##    requests and approved PATs but no stable setters; --audit
    ##    lists what's in flight, --apply prints a skip + UI URL.
-   printf '%s\n' "\
-skip: ${org}: PAT policy toggles must be set via UI - see
-       https://github.com/organizations/${org}/settings/personal-access-tokens"
-   record_skip
+   log notice "skip: ${org}: PAT policy toggles must be set via UI - see https://github.com/organizations/${org}/settings/personal-access-tokens"
 
    ## 10. GitHub App / OAuth App install policies (UI-only). Same
    ##     pattern as step 9.
-   printf '%s\n' "\
-skip: ${org}: GitHub App / OAuth App policies must be set via UI - see
-       https://github.com/organizations/${org}/settings/installations
-       https://github.com/organizations/${org}/settings/oauth_application_policy"
-   record_skip
+   log notice "skip: ${org}: GitHub App / OAuth App policies must be set via UI - see https://github.com/organizations/${org}/settings/installations and https://github.com/organizations/${org}/settings/oauth_application_policy"
 }
 
 ## One-line GET-and-print helper for audit_org_state. Args:
@@ -439,12 +402,12 @@ audit_get() {
    jq_filter="${3:-.}"
 
    result="$(ghorg_api GET "${path}")" || {
-      printf '%s\n' "  ${label}: <api error>"
+      log notice "  ${label}: <api error>"
       return 0
    }
    status="$(ghorg_status_of "${result}")"
    if [ "${status}" != '200' ]; then
-      printf '%s\n' "  ${label}: HTTP ${status}"
+      log notice "  ${label}: HTTP ${status}"
       return 0
    fi
    body="$(ghorg_body_of "${result}")"
@@ -452,7 +415,7 @@ audit_get() {
       | jq -r -- "${jq_filter}" 2>/dev/null \
       | tr -- '\n' ' ' \
       | sanitize-string 200)"
-   printf '%s\n' "  ${label}: ${extracted}"
+   log notice "  ${label}: ${extracted}"
 }
 
 ## Read-only inspection of an org's current security/policy state.
@@ -467,12 +430,11 @@ audit_org_state() {
    local ruleset_body ruleset_name ids id safe_id member safe_member
    local pending approved installs install_line total no_secret
    local safe_pending safe_approved safe_total safe_no_secret safe_install_line
-   local repos repo missing_count have_count missing_list
+   local repos repo missing_count have_count
 
    org="$1"
 
-   printf '%s\n' ""
-   printf '%s\n' "=== audit: ${org} ==="
+   log notice "=== audit: ${org} ==="
 
    audit_get 'fork-PR approval policy' \
       "/orgs/${org}/actions/permissions/fork-pr-contributor-approval" \
@@ -498,10 +460,9 @@ audit_org_state() {
       enabled_repos="$(printf '%s' "${actions_body}" | jq --raw-output -- '.enabled_repositories // "?"')"
       safe_allowed_actions="$(ghorg_safe_print 64 "${allowed_actions}")"
       safe_enabled_repos="$(ghorg_safe_print 64 "${enabled_repos}")"
-      printf '%s\n' \
-         "  actions allowed_actions: enabled_repos=${safe_enabled_repos}, allowed_actions=${safe_allowed_actions}"
+      log notice "  actions allowed_actions: enabled_repos=${safe_enabled_repos}, allowed_actions=${safe_allowed_actions}"
    else
-      printf '%s\n' "  actions allowed_actions: HTTP ${actions_status}"
+      log notice "  actions allowed_actions: HTTP ${actions_status}"
    fi
 
    if [ "${allowed_actions}" = 'selected' ]; then
@@ -509,8 +470,7 @@ audit_org_state() {
          "/orgs/${org}/actions/permissions/selected-actions" \
          '"github_owned=" + ((.github_owned_allowed // false) | tostring) + ", verified=" + ((.verified_allowed // false) | tostring) + ", patterns=" + ((.patterns_allowed // []) | length | tostring)'
    else
-      printf '%s\n' \
-         "  selected-actions allow-list: (N/A while allowed_actions=${safe_allowed_actions:-?})"
+      log notice "  selected-actions allow-list: (N/A while allowed_actions=${safe_allowed_actions:-?})"
    fi
 
    audit_get '2FA required for org members' \
@@ -524,24 +484,24 @@ audit_org_state() {
    ## Members without 2FA - the list that would be removed if 2FA
    ## enforcement were enabled. Paginate; stop after a sensible cap to
    ## avoid runaway output if the org has many such members.
-   printf '%s\n' '  members lacking 2FA (would lose org access until they enroll):'
+   log notice '  members lacking 2FA (would lose org access until they enroll):'
    result="$(ghorg_api GET "/orgs/${org}/members?filter=2fa_disabled&per_page=100")" || true
    status="$(ghorg_status_of "${result}")"
    if [ "${status}" = '200' ]; then
       body="$(ghorg_body_of "${result}")"
       count="$(printf '%s' "${body}" | jq -- 'length')"
       if [ "${count}" = '0' ]; then
-         printf '%s\n' '    (none)'
+         log notice '    (none)'
       else
          names="$(printf '%s' "${body}" | jq -r -- '.[].login')"
          while IFS= read -r member; do
             [ -z "${member}" ] && continue
             safe_member="$(ghorg_safe_print 64 "${member}")"
-            printf '%s\n' "    - ${safe_member}"
+            log notice "    - ${safe_member}"
          done <<< "${names}"
       fi
    else
-      printf '%s\n' "    HTTP ${status} (need admin:org / Members read scope)"
+      log notice "    HTTP ${status} (need admin:org / Members read scope)"
    fi
 
    ## Existing rulesets matching the names we'd upsert (branch + tag).
@@ -550,22 +510,22 @@ audit_org_state() {
    if [ "${status}" = '200' ]; then
       ruleset_body="$(ghorg_body_of "${result}")"
       for ruleset_name in "${RULESET_NAME_BRANCH}" "${RULESET_NAME_TAG}"; do
-         printf '%s\n' "  existing rulesets named \"${ruleset_name}\":"
+         log notice "  existing rulesets named \"${ruleset_name}\":"
          ids="$(printf '%s' "${ruleset_body}" \
             | jq -r --arg name "${ruleset_name}" -- \
               '.[] | select(.name == $name) | .id' || true)"
          if [ -z "${ids}" ]; then
-            printf '%s\n' '    (none; --apply would create one)'
+            log notice '    (none; --apply would create one)'
          else
             while IFS= read -r id; do
                [ -z "${id}" ] && continue
                safe_id="$(ghorg_safe_print 32 "${id}")"
-               printf '%s\n' "    - id=${safe_id}"
+               log notice "    - id=${safe_id}"
             done <<< "${ids}"
          fi
       done
    else
-      printf '%s\n' "  rulesets list: HTTP ${status} (token may lack admin:org)"
+      log notice "  rulesets list: HTTP ${status} (token may lack admin:org)"
    fi
 
    ## Personal access tokens: count pending requests + count approved
@@ -573,7 +533,7 @@ audit_org_state() {
    ## fine-grained PAT system is in active use, which is informative
    ## context for the operator deciding whether to flip the UI policy
    ## toggles (the toggles are not REST-settable - see apply_org_policy).
-   printf '%s\n' '  fine-grained PAT activity:'
+   log notice '  fine-grained PAT activity:'
    result="$(ghorg_api GET "/orgs/${org}/personal-access-token-requests?per_page=1")" || true
    status="$(ghorg_status_of "${result}")"
    case "${status}" in
@@ -582,14 +542,13 @@ audit_org_state() {
          ## follow-up if exact totals matter (skipped for simplicity).
          pending="$(ghorg_body_of "${result}" | jq -- 'length' 2>/dev/null || printf '%s' '?')"
          safe_pending="$(ghorg_safe_print 32 "${pending}")"
-         printf '%s\n' "    pending requests on first page: ${safe_pending}"
+         log notice "    pending requests on first page: ${safe_pending}"
          ;;
       404|403)
-         printf '%s\n' \
-            "    requests endpoint: HTTP ${status} (approval flow may be off / token lacks scope)"
+         log notice "    requests endpoint: HTTP ${status} (approval flow may be off / token lacks scope)"
          ;;
       *)
-         printf '%s\n' "    requests endpoint: HTTP ${status}"
+         log notice "    requests endpoint: HTTP ${status}"
          ;;
    esac
    result="$(ghorg_api GET "/orgs/${org}/personal-access-tokens?per_page=1")" || true
@@ -598,16 +557,16 @@ audit_org_state() {
       200)
          approved="$(ghorg_body_of "${result}" | jq -- 'length' 2>/dev/null || printf '%s' '?')"
          safe_approved="$(ghorg_safe_print 32 "${approved}")"
-         printf '%s\n' "    approved tokens on first page: ${safe_approved}"
+         log notice "    approved tokens on first page: ${safe_approved}"
          ;;
       *)
-         printf '%s\n' "    approved tokens endpoint: HTTP ${status} (token may lack admin:org)"
+         log notice "    approved tokens endpoint: HTTP ${status} (token may lack admin:org)"
          ;;
    esac
 
    ## Installed GitHub Apps. List names so operator can verify the set
    ## is the intended one before deciding whether to lock down installs.
-   printf '%s\n' '  installed GitHub Apps:'
+   log notice '  installed GitHub Apps:'
    result="$(ghorg_api GET "/orgs/${org}/installations?per_page=100")" || true
    status="$(ghorg_status_of "${result}")"
    if [ "${status}" = '200' ]; then
@@ -615,16 +574,16 @@ audit_org_state() {
          | jq -r -- '.installations[]? | "    - " + (.app_slug // "?") + " (id=" + ((.id // 0) | tostring) + ")"' \
          2>/dev/null || true)"
       if [ -z "${installs}" ]; then
-         printf '%s\n' '    (none)'
+         log notice '    (none)'
       else
          while IFS= read -r install_line; do
             [ -z "${install_line}" ] && continue
             safe_install_line="$(ghorg_safe_print 200 "${install_line}")"
-            printf '%s\n' "${safe_install_line}"
+            log notice "${safe_install_line}"
          done <<< "${installs}"
       fi
    else
-      printf '%s\n' "    HTTP ${status}"
+      log notice "    HTTP ${status}"
    fi
 
    ## Org webhooks: any without a configured `secret` are a Critical
@@ -633,7 +592,7 @@ audit_org_state() {
    ## a non-empty placeholder in `.config.secret`. Absent or empty
    ## means no secret configured - the webhook accepts unauthenticated
    ## payloads.
-   printf '%s\n' '  org webhooks (Scorecard "Webhooks" check):'
+   log notice '  org webhooks (Scorecard "Webhooks" check):'
    result="$(ghorg_api GET "/orgs/${org}/hooks?per_page=100")" || true
    status="$(ghorg_status_of "${result}")"
    if [ "${status}" = '200' ]; then
@@ -644,12 +603,12 @@ audit_org_state() {
       safe_total="$(ghorg_safe_print 32 "${total}")"
       safe_no_secret="$(ghorg_safe_print 32 "${no_secret}")"
       if [ "${total}" = '0' ]; then
-         printf '%s\n' '    (none configured)'
+         log notice '    (none configured)'
       else
-         printf '%s\n' "    total=${safe_total}, lacking secret=${safe_no_secret}"
+         log notice "    total=${safe_total}, lacking secret=${safe_no_secret}"
       fi
    else
-      printf '%s\n' "    HTTP ${status} (token may lack admin:org_hook scope)"
+      log notice "    HTTP ${status} (token may lack admin:org_hook scope)"
    fi
 
    ## Dependabot config-file presence: the OSSF Scorecard
@@ -658,14 +617,13 @@ audit_org_state() {
    ## security config enables Dependabot alerts, repos missing the
    ## file still fail Scorecard. This audit counts repos with vs
    ## without and lists the missing ones as a worklist.
-   printf '%s\n' '  dependabot.yml presence (Scorecard "Dependency-Update-Tool"):'
+   log notice '  dependabot.yml presence (Scorecard "Dependency-Update-Tool"):'
    repos="$(ghorg_list_repos "${org}" 0 0 0 | sort --unique)"
    if [ -z "${repos}" ]; then
-      printf '%s\n' '    (no public non-archived non-fork repos)'
+      log notice '    (no public non-archived non-fork repos)'
    else
       missing_count=0
       have_count=0
-      missing_list=''
       while IFS= read -r repo; do
          [ -z "${repo}" ] && continue
          result="$(ghorg_api GET "/repos/${org}/${repo}/contents/.github/dependabot.yml")" || true
@@ -674,13 +632,10 @@ audit_org_state() {
             have_count=$(( have_count + 1 ))
          else
             missing_count=$(( missing_count + 1 ))
-            missing_list+="    - ${org}/${repo}"$'\n'
+            log notice "    - ${org}/${repo}"
          fi
       done <<< "${repos}"
-      printf '%s\n' "    have=${have_count}, missing=${missing_count}"
-      if [ -n "${missing_list}" ]; then
-         printf '%s' "${missing_list}"
-      fi
+      log notice "    have=${have_count}, missing=${missing_count}"
    fi
 }
 
@@ -703,12 +658,13 @@ apply_repo_policy() {
       PATCH "/repos/${owner}/${repo}" "${patch}" || true
 }
 
-dm_github_policy_cleanup_counter_file() {
-   safe-rm --force -- "${api_counter_file}"
+dm_github_policy_cleanup_warn_file() {
+   # shellcheck disable=SC2317  ## invoked indirectly via trap
+   safe-rm --force -- "${POLICY_WARN_FILE}"
 }
 
 main() {
-   local org repos active repo n_ok n_warn n_dry n_skip
+   local org repos active repo
    if [ "${mode}" = 'audit' ]; then
       for org in "${ORGS[@]}"; do
          audit_org_state "${org}"
@@ -716,18 +672,19 @@ main() {
       return 0
    fi
 
-   ## Set up the tally tempfile before any api_call runs. Children
-   ## from the per-repo parallel loop inherit api_counter_file via
-   ## environment so their api_record appends land in the same file.
-   api_counter_file="$(mktemp)"
-   export api_counter_file
-   trap dm_github_policy_cleanup_counter_file EXIT
+   ## Set up the warn-flag tempfile before any policy_api_call runs.
+   ## Backgrounded children from the per-repo loop inherit the env
+   ## var so their warn appends land in the same file. Single-byte
+   ## appends are atomic across concurrent writers (see
+   ## github-policy-lib.bsh _policy_mark_warn).
+   POLICY_WARN_FILE="$(mktemp)"
+   export POLICY_WARN_FILE
+   trap dm_github_policy_cleanup_warn_file EXIT
 
    for org in "${ORGS[@]}"; do
       apply_org_policy "${org}"
 
-      printf '%s\n' ""
-      printf '%s\n' "=== repo policy: ${org} ==="
+      log notice "=== repo policy: ${org} ==="
       ## Public, non-archived, non-fork repos. The org-level enable_all
       ## endpoints already cover security products on every repo; this
       ## loop is just for has_wiki / has_issues which have no org-wide
@@ -751,28 +708,13 @@ main() {
       wait
    done
 
-   ## End-of-run summary. Each api_call / record_skip appended one
-   ## line per event; sum by status.
-   n_ok="$(  grep --count -- '^ok$'   "${api_counter_file}" 2>/dev/null || true)"
-   n_warn="$(grep --count -- '^warn$' "${api_counter_file}" 2>/dev/null || true)"
-   n_dry="$( grep --count -- '^dry$'  "${api_counter_file}" 2>/dev/null || true)"
-   n_skip="$(grep --count -- '^skip$' "${api_counter_file}" 2>/dev/null || true)"
-   ## grep returns "" when the file is empty; normalize to 0.
-   n_ok="${n_ok:-0}"; n_warn="${n_warn:-0}"
-   n_dry="${n_dry:-0}"; n_skip="${n_skip:-0}"
-
-   printf '%s\n' ""
-   printf '%s\n' "=== summary ==="
-   printf '%s\n' "  ok:      ${n_ok}"
-   printf '%s\n' "  warn:    ${n_warn}"
-   printf '%s\n' "  dry-run: ${n_dry}"
-   printf '%s\n' "  skip:    ${n_skip}   (UI-only; see \"skip:\" lines above)"
-   printf '%s\n' ""
-   printf '%s\n' "done."
-
-   ## Non-zero exit if anything went wrong, so callers (cron, CI) can
-   ## react. dry-run + skip are not failures.
-   if [ "${n_warn}" -gt 0 ]; then
+   ## Single bit of bookkeeping: did any warn happen anywhere? CI /
+   ## cron callers want a non-zero exit when something went wrong;
+   ## the operator reads the log lines above to see what specifically
+   ## failed. No per-status counters or summary printout - those add
+   ## noise without adding signal beyond what the log lines already
+   ## convey.
+   if [ -s "${POLICY_WARN_FILE}" ]; then
       return 1
    fi
 }

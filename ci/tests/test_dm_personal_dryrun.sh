@@ -45,9 +45,25 @@ FIXTURE_DIR="$(cd -- "${SCRIPT_DIR}/../fixtures" && pwd)"
 export GHORG_MOCK=1
 export GHORG_MOCK_DIR="${FIXTURE_DIR}"
 
+set +o errexit
 out="$(dm-github-personal-policy personal-test-user --dry-run 2>&1)"
+rc=$?
+set -o errexit
 
 fail=0
+
+## Dry-run does no real API calls (policy_api_call and
+## policy_upsert_repo_ruleset short-circuit before ghorg_api), so no
+## warn path can fire and exit must be 0. A non-zero exit means the
+## tool's POLICY_WARN_FILE flag ended up non-empty, i.e. a warn
+## slipped through somewhere the lib structurally said it could not.
+## Exit-code check replaces the prior brittle "no [WARN]: in output"
+## regex.
+if [ "${rc}" -ne 0 ]; then
+   printf '%s\n' "FAIL: --dry-run exited non-zero (rc='${rc}'); a warn slipped through" >&2
+   fail=1
+fi
+
 required=(
    'DRY-RUN: personal-test-user/backup-mirror: fork-PR approval=all_external_contributors'
    'DRY-RUN: personal-test-user/backup-mirror: workflow GITHUB_TOKEN read-only'
@@ -68,16 +84,6 @@ for needle in "${required[@]}"; do
       fail=1
    fi
 done
-
-## --dry-run must not emit a real "ok:" or "warn:" prefix that comes
-## from policy_api_call's success/failure path - those mean a real
-## PUT/PATCH/DELETE ran.
-if grep --quiet --extended-regexp -- '^ok:|^warn:' <<< "${out}"; then
-   printf '%s\n' \
-      'FAIL: --dry-run unexpectedly printed ok:/warn: real-API output:' >&2
-   grep --extended-regexp -- '^ok:|^warn:' <<< "${out}" | head -5 >&2
-   fail=1
-fi
 
 ## Filter check: actions enabled=true and the selected-actions
 ## allow-list must NOT appear (we disabled Actions entirely instead).

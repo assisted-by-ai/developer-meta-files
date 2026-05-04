@@ -128,31 +128,39 @@ genuinely need shell-escaping), no extra `\n` in the format.
   specific cases such as: `printf '%s\n' '"has" "a" "lot" "quotes"'`
   to avoid escaping `\"`.
 
-### printf vs log: use `log` for ad-hoc messages
+### Output to user goes through `log`
 
-`printf '%s\n' "..."` is for the script's *structured output* - lines
-that downstream tools (tests, log scrapers, the operator's eye) match
-against a known prefix. `DRY-RUN: ...`, `ok:   ...`, `warn: ...`,
-`error: ...`, `forked: ...`, `=== summary ===` - those stay as
-`printf` so the prefix is exact.
+Anything written to the user's terminal goes through the `log`
+helpers, not `printf`. The helpers prefix the script name and a
+level tag (`script.sh [NOTICE]: ...`) which gives the reader the
+context "what tool is talking to me, at what severity." A bare
+`printf '%s\n' "..."` to stdout/stderr loses both.
 
-For an *informational* message that is not part of a contract -
-"no source repos matched.", "no new forks needed.", "skipping X
-because Y" - use `log notice "..."` (or `log info`, `log warn`,
-`log error` as appropriate). The log helpers prefix the script name
-and a level tag (`script.sh [NOTICE]: ...`) which is the right
-context for an ad-hoc message and the wrong context for a structured
-prefix line.
+This holds for *every* line the operator sees - status updates
+("no source repos matched."), structured progress
+("DRY-RUN: ${label} -> ${method} ${path}", "ok: ${label}", etc.),
+section headers ("=== summary ==="), warnings, and errors. There is
+no "structured prefix" exception. Tests that grep for those
+substrings still find them inside the log line; the `[NOTICE]:`
+prefix sits in front and the substring is unaffected.
 
 ```
-## structured output - test greps for ^ok: and ^warn:
-printf '%s\n' "ok:   ${label} [${status}]"
-printf '%s\n' "warn: '${label}' ['${status}']" >&2
-
-## ad-hoc info - reader wants the script name + level tag
+log notice "DRY-RUN: ${label} -> ${method} ${path}"
+log notice "ok: ${label} [${status}]"
+log warn   "'${label}' ['${status}']: ${safe_body}"
+log error  "could not determine account type for '${owner}'"
 log notice 'no new forks needed.'
-log warn   "skipping '${repo}': default branch missing"
 ```
+
+Reserve `printf` for cases where it is genuinely the right tool:
+
+* Writing to a file or pipe (`printf '%s\n' "${name}" >> "${file}"`).
+* Feeding a variable through a subshell to another tool
+  (`names="$(printf '%s' "${body}" | jq -r '.[].name')"`).
+* Building strings via `printf -v`.
+
+Blank-line separators (`printf '%s\n' ""`) are noise once every line
+has a `[NOTICE]:` prefix; drop them.
 
 ## Flags
 

@@ -126,7 +126,6 @@ for src in "${SOURCE_ORGS[@]}"; do
    if [ -n "${SOURCE_EXCLUDE_RE[${src}]:-}" ]; then
       per_src_flags+=( --exclude "${SOURCE_EXCLUDE_RE[${src}]}" )
    fi
-   log notice ""
    log notice "=== ${src} -> ${MIRROR} ==="
    github-org-fork "${debug_flag[@]}" "${POLICY_FLAGS[@]}" "${per_src_flags[@]}" "${positional_args[@]}" -- "${src}" "${MIRROR}"
 done

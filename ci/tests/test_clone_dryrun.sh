@@ -27,7 +27,9 @@ FIXTURE_DIR="$(cd -- "${SCRIPT_DIR}/../fixtures" && pwd)"
 export GHORG_MOCK=1
 export GHORG_MOCK_DIR="${FIXTURE_DIR}"
 
-out="$(github-org-clone --dry-run org-ai-assisted /tmp/clone-dryrun-out)"
+## Capture stderr too: github-org-clone routes user-facing output
+## through log notice / log warn now, all of which go to stderr.
+out="$(github-org-clone --dry-run org-ai-assisted /tmp/clone-dryrun-out 2>&1)"
 
 ## Expected: exactly two repos selected (derivative-maker,
 ## helper-scripts). The other three (archived/fork/private) must be
@@ -49,7 +51,10 @@ for repo in "${unexpected[@]}"; do
   fi
 done
 
-if ! grep --quiet -- '^2 repos to process' <<< "${out}"; then
+## "2 repos to process under <dir>" goes through log notice now, so
+## it is not anchored at column 0 anymore - look for the substring
+## anywhere in the line.
+if ! grep --quiet --fixed-strings -- '2 repos to process under' <<< "${out}"; then
   printf '%s\n' 'FAIL: expected "2 repos to process" header' >&2
   fail=1
 fi
