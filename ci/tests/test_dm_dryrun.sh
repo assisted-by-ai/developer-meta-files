@@ -59,11 +59,13 @@ done
 ## from policy_api_call's 2xx / non-2xx branch and route through
 ## 'log notice "ok: ..."' / 'log warn "..."', which produce
 ## "<script> [NOTICE]: ok: ..." and "<script> [WARN]: ..." lines.
-## Either substring/level-tag inside the line means a real PATCH ran.
-if grep --quiet --extended-regexp -- ' ok: |\[WARN\]:' <<< "${out}"; then
+## Match only the level-tag-then-content junction so the dry-run
+## summary count line "<script> [NOTICE]:   ok:      0" (with two
+## extra spaces of indent) is not a false positive.
+if grep --quiet --extended-regexp -- '\]: ok: |\[WARN\]:' <<< "${out}"; then
    printf '%s\n' \
       'FAIL: --dry-run unexpectedly printed real-API ok:/warn output:' >&2
-   grep --extended-regexp -- ' ok: |\[WARN\]:' <<< "${out}" | head -5 >&2
+   grep --extended-regexp -- '\]: ok: |\[WARN\]:' <<< "${out}" | head -5 >&2
    fail=1
 fi
 
