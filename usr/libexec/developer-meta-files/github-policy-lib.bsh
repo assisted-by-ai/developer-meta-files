@@ -70,15 +70,27 @@
 ##   $2 - HTTP method (GET / POST / PUT / PATCH / DELETE)
 ##   $3 - URL path (relative to ${GHORG_API})
 ##   $4 - JSON body (optional; required by POST / PUT / PATCH)
+##   $5 - one extra HTTP status code to accept as success (optional;
+##        single code, not a list - the case statement below expands
+##        it as a literal glob pattern, so pipe-separated forms will
+##        not work). Use for endpoints where a non-2xx is a
+##        documented "nothing to do" response that should not raise
+##        a warn - e.g. the GitHub Pages DELETE endpoint returns 404
+##        when the repo has no Pages site, which is the normal
+##        idempotent-cleanup case.
 ##
 ## Returns: 0 on success (or dry-run), 1 on failure (after warn).
 policy_api_call() {
-   local label method path body result status response_body safe_body
+   local label method path body extra_ok result status response_body safe_body
 
    label="$1"
    method="$2"
    path="$3"
    body="${4:-}"
+   ## Default to a sentinel that no real HTTP code can equal so the
+   ## interpolated case pattern below ('200|201|202|204|${extra_ok}')
+   ## stays well-formed when no extras were passed.
+   extra_ok="${5:-__none__}"
 
    if [ "${dry_run}" = '1' ]; then
       log notice "DRY-RUN: ${label} -> ${method} ${path}"
@@ -90,7 +102,7 @@ policy_api_call() {
    }
    status="$(ghorg_status_of "${result}")"
    case "${status}" in
-      200|201|202|204)
+      200|201|202|204|"${extra_ok}")
          [ "${POLICY_QUIET_OK:-0}" = '1' ] \
             || log notice "ok: ${label} [${status}]"
          return 0

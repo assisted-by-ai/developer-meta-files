@@ -181,12 +181,15 @@ apply_repo_policy() {
       || true
 
    ## 5. Disable GitHub Pages site if any. The DELETE endpoint is
-   ##    idempotent in spirit: 204 if a site existed and was removed,
-   ##    404 if no site (treated as warn but harmless). Not a
-   ##    permanent gate - any future Pages workflow run will recreate
-   ##    the site.
+   ##    idempotent in spirit: 204 if a site existed and was
+   ##    removed, 404 if no site. Pass '404' as policy_api_call's
+   ##    extra-ok-status arg so a "no Pages site" repo doesn't trip
+   ##    the warn flag - that is the common case for a backup
+   ##    mirror and would otherwise make every routine apply run
+   ##    exit non-zero. Not a permanent gate - any future Pages
+   ##    workflow run will recreate the site.
    policy_api_call "${target_user}/${repo}: delete Pages site (if any)" \
-      DELETE "/repos/${target_user}/${repo}/pages" \
+      DELETE "/repos/${target_user}/${repo}/pages" '' '404' \
       || true
 
    ## 6. Branch ruleset on the default branch: block force-push, block
