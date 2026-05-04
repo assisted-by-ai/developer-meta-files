@@ -1,0 +1,23 @@
+#!/bin/bash
+
+## Copyright (C) 2012 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+set -x
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+
+true "INFO: Currently running script: ${BASH_SOURCE[0]} $*"
+
+check-ref-commits-for-unicode "${1}"
+
+git log ..."...${1}"
+
+git diff --stat "...${1}"
+
+git diff "...${1}"
+
+true "$0: OK."
