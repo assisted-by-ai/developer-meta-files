@@ -3135,9 +3135,9 @@ main() {
    parse_args "$@"
    batch_meta_dry_run="${parsed_dry_run}"
    if [ "${batch_meta_dry_run}" = "true" ]; then
-      ## function 'log_run' honors variable '$dry_run'
-      dry_run=1
-      export dry_run
+      ## function 'log_run' honors variable '$dry_run_skip_commands'
+      dry_run_skip_commands=1
+      export dry_run_skip_commands
    fi
 
    if [ -z "${parsed_mode}" ] && [ -n "${parsed_target}" ]; then
