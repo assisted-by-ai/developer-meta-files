@@ -2395,7 +2395,10 @@ pkg_git_packages_git_log_writer() {
       fi
       git_log_range=( "${package_version_old}..${package_version_new}" )
    else
-      git_log_range=()
+      ## New package (absent from the old tag): announce its history UP TO the
+      ## new release tag, not through the working tree's HEAD, which may carry
+      ## commits made after the release was tagged.
+      git_log_range=( "${package_version_new}" )
    fi
 
    ## One git-log pass per repo emitting, per commit: hash, author name,
@@ -2409,8 +2412,11 @@ pkg_git_packages_git_log_writer() {
    ## Streamed through a temp file (not $(...)): command substitution strips
    ## NUL bytes, and a file keeps the git failure under errexit (a bad range
    ## aborts loudly instead of silently yielding no records).
+   ## -c log.showSignature=false: with that config (or --show-signature) set,
+   ## git prepends a gpg verification line to each record and shifts every
+   ## field -- and these are signed commits, so pin it off.
    commit_records_file="$(mktemp)"
-   git --no-pager log -z \
+   git --no-pager -c log.showSignature=false log -z \
       --pretty=format:'%H%n%an%n%s%n%B' "${git_log_range[@]}" > "${commit_records_file}"
 
    if [ ! -s "${commit_records_file}" ]; then
@@ -2942,7 +2948,7 @@ wait_for_git_processes() {
 generate_announcement() {
    local changelog_file derivative_name project_name project_website temp \
       derivative_version_new_main_short release_type_long end_text \
-      header_text announce_target announce_pre announce_post
+      header_text announce_target announce_tmp announce_pre announce_post
 
    for derivative_name in "${derivative_name_list[@]}"; do
       if [ "${derivative_name}" = 'kicksecure' ]; then
@@ -3034,11 +3040,16 @@ ${end_text}"
       if [ "${batch_meta_dry_run}" = 'true' ]; then
          log notice "[DRY-RUN] ${batch_current_package_reponame:-}: WOULD write announcement ${announce_target}" >&2
       else
+         ## Write to a temp file then `mv -f` into place so a pre-existing
+         ## symlink at the destination is REPLACED, not followed and its target
+         ## truncated (the atomic-replace semantics the old `overwrite` had).
+         announce_tmp="$(mktemp)"
          {
             printf '%s\n\n' "${announce_pre}"
             cat -- "${changelog_file}" 2>/dev/null || true
             printf '\n%s\n' "${announce_post}"
-         } > "${announce_target}"
+         } > "${announce_tmp}"
+         mv -f -- "${announce_tmp}" "${announce_target}"
       fi
    done
 }
