@@ -490,30 +490,37 @@ not dereference). Reserve `${var:-}` for genuinely-optional variables.
 
 ## printf
 
-**R-030: Always `printf '%s\n' "..."`, unless doing complex table-like
-formatting.** Format string is otherwise fixed; all data goes in the
-data string. No `%d`, no `%q` (except where shell-escaping is genuinely
-required), no extra `\n` in the format.
+**R-030: Always `printf '%s\n' "..."`.** The format is exactly
+`'%s\n'`, `'%s'` or `'%s\0'` (any quoting that yields that string);
+all text and data go in the data argument. No `%d`, no padding, no
+text and no extra `\n` in the format. GATE-ENFORCED.
 
-Numeric-probe carve-out (GATE-ENFORCED as an exemption): a `printf`
-with a SINGLE-quoted literal format whose own command discards BOTH
-stdout and stderr is a validator, not output, and keeps its format
-verb. `is_integer` in helper-scripts' `strings.bsh` is the case:
+    Bad:  printf '%s: kept %s\n' "${a}" "${b}"
+    Good: printf '%s\n' "${a}: kept ${b}"
 
-    printf '%d' "$1" >/dev/null 2>&1 || return 1
+Several lines: one data argument per line, `printf '%s\n' "line1"
+"line2"`. A byte escape: an ANSI-C `$'\303\251'` value.
 
-Nothing is emitted, so neither of this rule's failure modes is
-reachable, and the printf's FAILURE on a non-number is the check
-R-141 relies on -- rewriting the format to `%s` would silently turn
-that guard into one that always succeeds. Discarding stdout alone,
-or `2>&1 >/dev/null`, does not qualify (the latter form is identical
-to the above form but is unusual): those still emit.
+The gate also flags a double-quoted or unquoted format containing `$`
+or a backtick (data interpolated into the format).
 
-TODO: Add to dist-ai's shell rule checker a way to override this rule
-for specific lines of code. We need more complex printf format strings
-for things like formatting tables, and while we could theoretically
-reimplement the formatting logic, that would increase the code we need
-to understand and maintain.
+Exemptions (all gate-honored):
+
+- `printf -v` builds a string (R-041); any format.
+- A `%q`-only format (`'%q'`, `'%q '`, `'%q\n'`), only where
+  shell-escaping is genuinely required.
+- Numeric probe: a `%d`-only format whose own command sends BOTH
+  stdout and stderr to `/dev/null` is a validator, not output.
+  `is_integer` in helper-scripts' `strings.bsh`:
+
+      printf '%d' "$1" >/dev/null 2>&1 || return 1
+
+  The printf's FAILURE on a non-number is the check R-141 relies on;
+  a `%s` format would always succeed. Stdout alone, or `2>&1
+  >/dev/null` (stderr still on the old stdout), does not qualify.
+- Genuine table formatting (`%-10s` columns): file-wide waiver
+  `## style-ok: printf-format`.
+- Per-rule override: `## style-ok: R-030`.
 
 **R-031: Multi-line block: ONE quoted string with embedded
 newlines.** Multiple separate lines: one `printf '%s\n'` per line.
@@ -528,9 +535,9 @@ line should exist at all is R-042's separate call; this rule only
 fixes its form once you decide to write one.
 
 Waiver: `## style-ok: printf-format` (file-wide) suppresses BOTH the
-printf format rules -- R-030's format-injection check and R-031's
-bare-newline check. Reserve it for a file whose printf usage is
-deliberately non-standard; prefer the compliant `printf '%s\n' ""`.
+printf format rules -- R-030 (both checks) and R-031's bare-newline
+check. Reserve it for genuine table formatting; prefer the compliant
+`printf '%s\n' ""`.
 
 **R-032: Quote choice.** Double quotes preferred. Single quotes
 acceptable when the body has many doubles to escape:
@@ -1797,7 +1804,7 @@ _auto-detected: yes | auto-fixed: no_
 
     # Good -- a required tool absent fails LOUD:
     if ! type -P helper-script >/dev/null; then
-       printf 'FATAL: helper-script absent\n' >&2
+       printf '%s\n' 'FATAL: helper-script absent' >&2
        exit 1
     fi
 
