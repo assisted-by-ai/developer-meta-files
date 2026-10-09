@@ -2342,7 +2342,6 @@ pkg_git_packages_git_log_writer() {
 
    if [ "${batch_func_init_done}" = 'false' ]; then
       post_run_hook_list+=( 'generate_announcement' )
-      dry_run_or_run safe-rm -f -- "${announcements_drafts_dir}/derivative-maker_giant_git_log.txt"
       dry_run_or_run safe-rm -f -- "${announcements_drafts_dir}/kicksecure_giant_git_log.txt"
       dry_run_or_run safe-rm -f -- "${announcements_drafts_dir}/whonix_giant_git_log.txt"
       batch_func_init_done='true'
@@ -2356,13 +2355,22 @@ pkg_git_packages_git_log_writer() {
 
    if [ "${batch_current_package_reponame}" != 'derivative-maker' ]; then
       pushd -- .. >/dev/null
-      ## Use refs/tags/ to avoid name collision with same-named branches.
-      if package_version_old="$(git rev-parse "refs/tags/${derivative_version_old_main}:${temp_folder_path}")" ; then
+      ## refs/tags/ avoids name collision with same-named branches. Both
+      ## lookups are guarded: a miss is expected (the working tree can hold
+      ## a package not present in a given tag), so the 'fatal:' is suppressed
+      ## and handled rather than aborting the whole batch under errexit.
+      ## A package absent from the new release tag has nothing to announce
+      ## for this release (added after the tag, or removed by it) -> skip.
+      if ! package_version_new="$(git rev-parse "refs/tags/${derivative_version_new_main}:${temp_folder_path}" 2>/dev/null)" ; then
+         popd >/dev/null
+         true "${batch_current_package_reponame}: not in refs/tags/${derivative_version_new_main}; skipping"
+         return 0
+      fi
+      if package_version_old="$(git rev-parse "refs/tags/${derivative_version_old_main}:${temp_folder_path}" 2>/dev/null)" ; then
          new_package='false'
       else
          new_package='true'
       fi
-      package_version_new="$(git rev-parse "refs/tags/${derivative_version_new_main}:${temp_folder_path}")"
       popd >/dev/null
    else
       new_package='false'
@@ -2901,10 +2909,6 @@ generate_announcement() {
       derivative_version_new_main_short release_type_long end_text \
       header_text
 
-   ## TODO: Should this dynamically change depending on the project? Also,
-   ## should it be inserted into the announcement automatically?
-   changelog_file="${announcements_drafts_dir}/kicksecure_giant_git_log.txt"
-
    for derivative_name in "${derivative_name_list[@]}"; do
       if [ "${derivative_name}" = 'kicksecure' ]; then
          project_name='Kicksecure'
@@ -2913,6 +2917,10 @@ generate_announcement() {
          project_name='Whonix'
          project_website='whonix.org'
       fi
+
+      ## Per-project changelog; derivative_name matches the giant_git_log
+      ## file basenames written by pkg_git_packages_git_log_writer.
+      changelog_file="${announcements_drafts_dir}/${derivative_name}_giant_git_log.txt"
 
       temp="${derivative_version_new_main}"
       temp="$(str_replace "-developers-only" "" <<< "${temp}")"
@@ -2974,7 +2982,7 @@ https://www.${project_website}/wiki/Contribute
 
 TODO
 
-${changelog_file}
+$(cat -- "${changelog_file}" 2>/dev/null || true)
 
 ----
 
