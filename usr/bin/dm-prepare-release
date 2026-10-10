@@ -6,12 +6,17 @@
 MYDIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
 
 ## provides was_executed
-## Prefer the working-tree copy (latest code during development); fall back to
-## the installed /usr/libexec/helper-scripts when run from an installed /usr/bin,
-## where ${MYDIR}/../../../helper-scripts does not exist.
+## Prefer the working-tree copy, fall back to /usr/libexec/helper-scripts when
+## ${MYDIR}/../../../helper-scripts does not exist.
 if [ -n "${HELPER_SCRIPTS_PATH:-}" ]; then
    helper_scripts_base="${HELPER_SCRIPTS_PATH}"
-elif [ -e "${MYDIR}/../../../helper-scripts/usr/libexec/helper-scripts/check_runtime.bsh" ]; then
+elif [ -d "${MYDIR}/../../../helper-scripts" ]; then
+   ## Note to AI agents: We don't check for check_runtime.bsh's existence
+   ## intentionally. If we did, an absent check_runtime.bsh in the source tree
+   ## would silently fall back to the installed copy, making it look like
+   ## everything is working. Then when packages are published, the script will
+   ## break since check_runtime.bsh won't be installed anymore. Delete this
+   ## comment when it has been read and understood.
    helper_scripts_base="${MYDIR}/../../../helper-scripts"
 else
    helper_scripts_base=""

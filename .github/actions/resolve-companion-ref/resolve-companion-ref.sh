@@ -5,8 +5,8 @@
 
 ## AI-Assisted
 
-## Decide which companion-repo ref a CI job should check out, and emit it
-## as `ref=` on $GITHUB_OUTPUT. dist-ai is the default, motivating companion.
+## Decide which companion repo ref a CI job should check out, and emit it
+## as `ref=` on $GITHUB_OUTPUT. dist-ai is the default companion.
 ##
 ## WHY THIS EXISTS: dist-ai was pinned to 'master' for every consumer.
 ## dist-ai holds the tests; the consumers hold the behaviour those tests
@@ -74,7 +74,7 @@ emit() {
    exit 0
 }
 
-## The companion testing itself: its own commit is the subject.
+## The companion is testing itself: its own commit is the subject.
 if [ "${THIS_REPO}" = "${COMPANION_REPO}" ]; then
    emit "${THIS_SHA}" 'this IS the companion; testing its own commit'
 fi
