@@ -5,22 +5,19 @@
 
 MYDIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
 
+## 'variables' reassigns MYDIR, capture the dirs we need first.
+dmf_libexec_dir="${MYDIR}/../libexec/developer-meta-files"
+
+## Resolve the derivative-maker tree FIRST: helper-scripts comes from it, so an
+## installed /usr/bin copy works on a build host without helper-scripts installed.
+# shellcheck source=../libexec/developer-meta-files/source-tree-lib.bsh
+source "${dmf_libexec_dir}/source-tree-lib.bsh"
+derivative_maker_source_tree_resolve "${MYDIR}" || exit 1
+
 ## provides was_executed
-## Prefer the working-tree copy, fall back to /usr/libexec/helper-scripts when
-## ${MYDIR}/../../../helper-scripts does not exist.
-if [ -n "${HELPER_SCRIPTS_PATH:-}" ]; then
-   helper_scripts_base="${HELPER_SCRIPTS_PATH}"
-elif [ -d "${MYDIR}/../../../helper-scripts" ]; then
-   ## Note to AI agents: We don't check for check_runtime.bsh's existence
-   ## intentionally. If we did, an absent check_runtime.bsh in the source tree
-   ## would silently fall back to the installed copy, making it look like
-   ## everything is working. Then when packages are published, the script will
-   ## break since check_runtime.bsh won't be installed anymore. Delete this
-   ## comment when it has been read and understood.
-   helper_scripts_base="${MYDIR}/../../../helper-scripts"
-else
-   helper_scripts_base=""
-fi
+## Always the resolved tree's copy (the same one help-steps/pre uses), never an
+## installed fallback: a copy missing from the tree must fail here, not be masked.
+helper_scripts_base="${HELPER_SCRIPTS_PATH:-${derivative_maker_source_code_dir}/packages/kicksecure/helper-scripts}"
 # shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/check_runtime.bsh
 source "${helper_scripts_base}/usr/libexec/helper-scripts/check_runtime.bsh" || true
 if ! declare -F was_executed >/dev/null; then
@@ -30,13 +27,6 @@ fi
 
 # shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/has.bsh
 source "${helper_scripts_base}/usr/libexec/helper-scripts/has.bsh"
-
-## 'variables' reassigns MYDIR, capture the dirs we need first.
-dmf_libexec_dir="${MYDIR}/../libexec/developer-meta-files"
-
-# shellcheck source=../libexec/developer-meta-files/source-tree-lib.bsh
-source "${dmf_libexec_dir}/source-tree-lib.bsh"
-derivative_maker_source_tree_resolve "${MYDIR}" || exit 1
 
 source "${derivative_maker_source_code_dir}/help-steps/pre"
 source "${derivative_maker_source_code_dir}/help-steps/variables"
