@@ -3045,9 +3045,9 @@ ${end_text}"
          ## truncated (the atomic-replace semantics the old `overwrite` had).
          announce_tmp="$(mktemp)"
          {
-            printf '%s\n\n' "${announce_pre}"
+            printf '%s\n' "${announce_pre}" ''
             cat -- "${changelog_file}" 2>/dev/null || true
-            printf '\n%s\n' "${announce_post}"
+            printf '%s\n' '' "${announce_post}"
          } > "${announce_tmp}"
          mv -f -- "${announce_tmp}" "${announce_target}"
       fi
