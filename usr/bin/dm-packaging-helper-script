@@ -968,6 +968,12 @@ pkg_upstream_changelog_regenerate() {
 ## uncommentable ones. $PWD is the package dir (batch convention). Logic lives in
 ## usr/libexec/developer-meta-files/spdx-reuse.bsh.
 pkg_spdx_reuse_convert() {
+   ## Destructive in-place conversion; not representable as a dry-run, so skip
+   ## rather than mutate under --dry-run. Verify a real run via git diff + reuse lint.
+   if [ "${batch_meta_dry_run:-false}" = "true" ]; then
+      printf '%s\n' "INFO: pkg_spdx_reuse_convert skipped under --dry-run (destructive; review a real run via 'git diff' + 'reuse lint')."
+      return 0
+   fi
    spdx_reuse_convert_tree "${PWD}"
 }
 

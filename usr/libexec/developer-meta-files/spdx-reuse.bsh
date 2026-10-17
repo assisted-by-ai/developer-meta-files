@@ -12,6 +12,14 @@
 ## (precedence = "closest") for the uncommentable files only. All matching is
 ## literal string replacement via bash parameter expansion, never sed regex.
 
+## SCOPE (deliberate): for a single ENCRYPTED SUPPORT LLC / AGPL-3.0-or-later
+## Kicksecure or Whonix package, run per package and VERIFY with `reuse lint` plus
+## a `git diff` review. NOT a blind batch tool: it hardcodes the AGPL holder, so do
+## NOT run it on a vendored upstream with a different license (grml-debootstrap is
+## GPL-2+), and it REPLACES REUSE.toml wholesale, so a package with a curated
+## multi-license REUSE.toml needs manual handling. Email domain is packages/whonix
+## -> whonix.org, else kicksecure.com (other Whonix repo layouts are not special-cased).
+
 ## style-ok: no-strict -- sourced library.
 
 spdx_reuse_license_id="AGPL-3.0-or-later"
@@ -60,6 +68,15 @@ spdx_reuse_strip_leading_years() {
    printf '%s\n' "${val}"
 }
 
+## True when a marker's prefix is ONLY comment-syntax + whitespace, i.e. the line
+## is a real license header and not a code string literal that merely mentions the
+## marker (e.g. this file's own 'marker_cond="See the file COPYING..."'). Strips
+## every comment/whitespace char; a header prefix is then empty.
+spdx_reuse_prefix_is_comment() {
+   local stripped="${1//[$' \t#/*<!-']/}"
+   [ -z "${stripped}" ]
+}
+
 ## Convert ONE line, echoing the result (unchanged if it matches nothing):
 ##  - "<prefix>Copyright (C) <years> ENCRYPTED SUPPORT LLC <...>"
 ##       -> "<prefix>SPDX-FileCopyrightText: ENCRYPTED SUPPORT LLC <adrelanos@DOMAIN>"
@@ -68,7 +85,9 @@ spdx_reuse_strip_leading_years() {
 ##  - "<prefix>See the file COPYING for copying conditions."
 ##       -> "<prefix>SPDX-License-Identifier: AGPL-3.0-or-later"
 ## <prefix> is whatever precedes the matched marker (comment lead-in), so the
-## single code path handles '## ', '# ', bare (C block / HTML comment) alike.
+## single code path handles '## ', '# ', bare (C block / HTML comment) alike. A
+## marker whose prefix is NOT comment-only is a code literal -> left unchanged, so
+## the converter never corrupts a string/comment that mentions the marker.
 spdx_reuse_convert_line() {
    local line="${1}" email="${2}"
    local marker_copy="Copyright (C) "
@@ -77,6 +96,10 @@ spdx_reuse_convert_line() {
    case "${line}" in
       *"${marker_copy}"*)
          prefix="${line%%"${marker_copy}"*}"
+         if ! spdx_reuse_prefix_is_comment "${prefix}"; then
+            printf '%s\n' "${line}"
+            return 0
+         fi
          rest="${line#*"${marker_copy}"}"
          case "${rest}" in
             *"${spdx_reuse_holder}"*)
@@ -90,6 +113,10 @@ spdx_reuse_convert_line() {
          ;;
       *"${marker_cond}"*)
          prefix="${line%%"${marker_cond}"*}"
+         if ! spdx_reuse_prefix_is_comment "${prefix}"; then
+            printf '%s\n' "${line}"
+            return 0
+         fi
          printf '%s\n' "${prefix}SPDX-License-Identifier: ${spdx_reuse_license_id}"
          ;;
       *)
@@ -192,13 +219,28 @@ spdx_reuse__emit_hash() {
 }
 
 ## Echo a block-comment header insertion (open/close markers) prepended to a file.
+## A leading shebang (a JS tool) or XML/processing-instruction declaration MUST
+## stay on line 1, so the block goes after it.
 spdx_reuse__emit_block() {
-   local file="${1}" email="${2}" open="${3}" close="${4}"
-   printf '%s\n' "${open}"
-   printf '%s\n' "SPDX-FileCopyrightText: ${spdx_reuse_holder} <${email}>"
-   printf '%s\n' "SPDX-License-Identifier: ${spdx_reuse_license_id}"
-   printf '%s\n' "${close}" ""
-   cat -- "${file}"
+   local file="${1}" email="${2}" open="${3}" close="${4}" first
+   IFS= read -r first < "${file}" 2>/dev/null || first=""
+   case "${first}" in
+      '#!'* | '<?'*)
+         printf '%s\n' "${first}"
+         printf '%s\n' "${open}"
+         printf '%s\n' "SPDX-FileCopyrightText: ${spdx_reuse_holder} <${email}>"
+         printf '%s\n' "SPDX-License-Identifier: ${spdx_reuse_license_id}"
+         printf '%s\n' "${close}" ""
+         tail -n +2 -- "${file}"
+         ;;
+      *)
+         printf '%s\n' "${open}"
+         printf '%s\n' "SPDX-FileCopyrightText: ${spdx_reuse_holder} <${email}>"
+         printf '%s\n' "SPDX-License-Identifier: ${spdx_reuse_license_id}"
+         printf '%s\n' "${close}" ""
+         cat -- "${file}"
+         ;;
+   esac
 }
 
 ## Add an SPDX header to a comment-capable file that lacks one (no-op for 'none').
@@ -234,6 +276,12 @@ spdx_reuse_fix_dep5_copyright() {
    tmp="$(mktemp)"
    while IFS= read -r line || [ -n "${line}" ]; do
       case "${line}" in
+         "${marker}"*,*)
+            ## Multiple holders (a comma): leave untouched rather than risk
+            ## dropping a co-holder -- a multi-holder DEP-5 field is manual review.
+            printf '%s\n' "${line}"
+            printf '%s\n' "WARNING: multi-holder DEP-5 '${line}' left unchanged (review manually)" >&2
+            ;;
          "${marker}"*"${spdx_reuse_holder}"*)
             printf '%s\n' "${marker}${spdx_reuse_holder} <${email}>"
             ;;
@@ -279,7 +327,11 @@ spdx_reuse_generate_toml() {
          '  "auto-generated-man-pages/**",' \
          '  "changelog.upstream",'
       for p in "${extra[@]}"; do
-         [ -n "${p}" ] && printf '%s\n' "  \"${p}\","
+         [ -n "${p}" ] || continue
+         ## Escape for a TOML basic string so an odd path char cannot break it.
+         p="${p//\\/\\\\}"
+         p="${p//\"/\\\"}"
+         printf '%s\n' "  \"${p}\","
       done
       printf '%s\n' \
          ']' \
@@ -299,25 +351,32 @@ spdx_reuse_convert_tree() {
    real="$(cd -- "${dir}" && pwd -P)" || return 1
    email="$(spdx_reuse_email_for_path "${real}")"
 
-   while IFS= read -r file; do
+   ## NUL-delimited, so a filename with a newline/space is read as one entry.
+   while IFS= read -r -d '' file; do
       files+=("${file}")
-   done < <(git -C "${dir}" ls-files)
+   done < <(git -C "${dir}" ls-files -z)
    if [ "${#files[@]}" -eq 0 ]; then
       printf '%s\n' "ERROR: no tracked files under ${dir} (not a git checkout?)" >&2
       return 1
    fi
 
-   ## Pass 1: rewrite existing Kicksecure headers to SPDX.
+   ## Pass 1: rewrite existing Kicksecure headers to SPDX. Skip symlinks: a
+   ## symlink's tracked content is its target path, and an in-place rewrite would
+   ## follow it and clobber a file OUTSIDE the repo.
    for file in "${files[@]}"; do
+      [ -L "${dir}/${file}" ] && continue
       if spdx_reuse_file_has_kicksecure_header "${dir}/${file}"; then
          spdx_reuse_convert_file "${dir}/${file}" "${email}"
       fi
    done
 
    ## Pass 2: add a header to each comment-capable file still lacking one.
+   ## comment_style gets the FULL path so its shebang probe reads the real file
+   ## regardless of the caller's cwd.
    for file in "${files[@]}"; do
+      [ -L "${dir}/${file}" ] && continue
       spdx_reuse_has_spdx "${dir}/${file}" && continue
-      style="$(spdx_reuse_comment_style "${file}")"
+      style="$(spdx_reuse_comment_style "${dir}/${file}")"
       [ "${style}" = none ] && continue
       spdx_reuse_add_header "${dir}/${file}" "${email}"
    done
@@ -325,9 +384,9 @@ spdx_reuse_convert_tree() {
    ## DEP-5 year drop.
    spdx_reuse_fix_dep5_copyright "${dir}/debian/copyright" "${email}"
 
-   ## Uncommentable leftovers not already covered by the generic globs.
+   ## Uncommentable leftovers (and every symlink -- never header-written) not
+   ## covered by the generic globs go into REUSE.toml so 'reuse lint' stays green.
    for file in "${files[@]}"; do
-      spdx_reuse_has_spdx "${dir}/${file}" && continue
       case "${file}" in
          COPYING | changelog.upstream | REUSE.toml)
             continue
@@ -336,6 +395,11 @@ spdx_reuse_convert_tree() {
             continue
             ;;
       esac
+      ## A symlink is never given a header (pass 1/2 skip it), so always annotate
+      ## it by path; do not consult has_spdx, which would follow the link.
+      if [ ! -L "${dir}/${file}" ] && spdx_reuse_has_spdx "${dir}/${file}"; then
+         continue
+      fi
       extra+=("${file}")
    done
 
