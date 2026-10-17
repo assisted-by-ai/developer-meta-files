@@ -38,6 +38,8 @@ source "${derivative_maker_source_code_dir}/packages/kicksecure/helper-scripts/u
 source "${derivative_maker_source_code_dir}/packages/kicksecure/helper-scripts/usr/libexec/helper-scripts/git.sh"
 source "${derivative_maker_source_code_dir}/packages/kicksecure/helper-scripts/usr/libexec/helper-scripts/parallel.bsh"
 source "${derivative_maker_source_code_dir}/packages/kicksecure/genmkfile/usr/share/genmkfile/make-helper-one.bsh"
+## Local dmf libexec helper (self-anchored: ../libexec from usr/bin, source or installed).
+source "${MYDIR}/../libexec/developer-meta-files/spdx-reuse.bsh"
 
 log_level=info
 
@@ -959,6 +961,14 @@ pkg_upstream_changelog_regenerate() {
    git add "changelog.upstream"
    git commit -m "genmkfile uch"
    git status
+}
+
+## Convert the current package to the SPDX/REUSE hybrid layout: per-file SPDX
+## headers on comment-capable files + a narrow generic REUSE.toml for the
+## uncommentable ones. $PWD is the package dir (batch convention). Logic lives in
+## usr/libexec/developer-meta-files/spdx-reuse.bsh.
+pkg_spdx_reuse_convert() {
+   spdx_reuse_convert_tree "${PWD}"
 }
 
 ## Commits changes to all project README files.

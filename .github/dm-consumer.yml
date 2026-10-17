@@ -35,7 +35,9 @@ dist-ai-tests:
   ## redirection and FATALs on an absent prerequisite (pytest is in the baseline;
   ## mypy is not). This is a tool dependency of that test, NOT a dist-ai mypy CI
   ## gate (type-checking dist-ai's own code stays local-only).
-  apt-packages: "jq python3-yaml python3-apt shellcheck shfmt safe-rm curl pre-commit-hooks pv xz-utils dpkg-dev strip-nondeterminism dosfstools mtools xxd mypy"
+  ## reuse: test_spdx_reuse sources spdx-reuse.bsh and asserts 'reuse lint'
+  ## exit 0 on a converted fixture; FATALs if absent (in Debian trixie).
+  apt-packages: "jq python3-yaml python3-apt shellcheck shfmt safe-rm curl pre-commit-hooks pv xz-utils dpkg-dev strip-nondeterminism dosfstools mtools xxd mypy reuse"
   ## The developer-meta-files-tests (style gate, dm-review-branch) and
   ## github-org-tools-tests suites drive this repo's tools, which source
   ## helper-scripts (sanitize-string, has.bsh, log_run_die) via
