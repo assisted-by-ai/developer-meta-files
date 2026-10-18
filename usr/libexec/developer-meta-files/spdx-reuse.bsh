@@ -9,8 +9,9 @@
 
 ## Convert Kicksecure license headers to the SPDX/REUSE HYBRID layout: a per-file
 ## SPDX header on every comment-capable file plus a NARROW generic REUSE.toml
-## (precedence = "closest") for the uncommentable files only. All matching is
-## literal string replacement via bash parameter expansion, never sed regex.
+## (precedence = "closest") for the uncommentable files only. The header rewrite is
+## literal whole-string replacement via the `str_replace` tool, never sed regex, so
+## a comment prefix and any same-line closer are preserved untouched.
 
 ## SCOPE (deliberate): for a single ENCRYPTED SUPPORT LLC / AGPL-3.0-or-later
 ## Kicksecure or Whonix package, run per package and VERIFY with `reuse lint` plus
@@ -68,73 +69,48 @@ spdx_reuse_strip_leading_years() {
    printf '%s\n' "${val}"
 }
 
-## True when a marker's prefix is ONLY comment-syntax + whitespace, i.e. the line
-## is a real license header and not a code string literal that merely mentions the
-## marker (e.g. this file's own 'marker_cond="See the file COPYING..."'). Strips
-## every comment/whitespace char; a header prefix is then empty.
-spdx_reuse_prefix_is_comment() {
-   local stripped="${1//[$' \t#/*<!-']/}"
-   [ -z "${stripped}" ]
-}
-
-## Convert ONE line, echoing the result (unchanged if it matches nothing):
-##  - "<prefix>Copyright (C) <years> ENCRYPTED SUPPORT LLC <...>"
-##       -> "<prefix>SPDX-FileCopyrightText: ENCRYPTED SUPPORT LLC <adrelanos@DOMAIN>"
-##  - "<prefix>Copyright (C) <years> <other holder> <...>"
-##       -> "<prefix>SPDX-FileCopyrightText: <other holder> <...>"   (years dropped)
-##  - "<prefix>See the file COPYING for copying conditions."
-##       -> "<prefix>SPDX-License-Identifier: AGPL-3.0-or-later"
-## <prefix> is whatever precedes the matched marker (comment lead-in), so the
-## single code path handles '## ', '# ', bare (C block / HTML comment) alike. A
-## marker whose prefix is NOT comment-only is a code literal -> left unchanged, so
-## the converter never corrupts a string/comment that mentions the marker.
-spdx_reuse_convert_line() {
-   local line="${1}" email="${2}"
-   local marker_copy="Copyright (C) "
-   local marker_cond="See the file COPYING for copying conditions."
-   local prefix rest
-   case "${line}" in
-      *"${marker_copy}"*)
-         prefix="${line%%"${marker_copy}"*}"
-         if ! spdx_reuse_prefix_is_comment "${prefix}"; then
-            printf '%s\n' "${line}"
-            return 0
-         fi
-         rest="${line#*"${marker_copy}"}"
-         case "${rest}" in
-            *"${spdx_reuse_holder}"*)
-               printf '%s\n' "${prefix}SPDX-FileCopyrightText: ${spdx_reuse_holder} <${email}>"
-               ;;
-            *)
-               rest="$(spdx_reuse_strip_leading_years "${rest}")"
-               printf '%s\n' "${prefix}SPDX-FileCopyrightText: ${rest}"
-               ;;
-         esac
-         ;;
-      *"${marker_cond}"*)
-         prefix="${line%%"${marker_cond}"*}"
-         if ! spdx_reuse_prefix_is_comment "${prefix}"; then
-            printf '%s\n' "${line}"
-            return 0
-         fi
-         printf '%s\n' "${prefix}SPDX-License-Identifier: ${spdx_reuse_license_id}"
-         ;;
-      *)
-         printf '%s\n' "${line}"
-         ;;
-   esac
-}
-
-## Rewrite a file in place, converting every legacy header line. The file's
-## mode/owner are kept (content is written back over the original inode).
+## Rewrite a file's legacy Kicksecure headers to SPDX, IN PLACE, via literal
+## str_replace: the comment prefix and any same-line closer (/* ... */, <!-- ... -->)
+## sit outside the search string, so a one-line block/HTML header is never left
+## unterminated. str_replace edits in place (mode/owner preserved). Order matters:
+## normalize the company copyright END year to the current year, THEN drop it.
+## Every year/email edit is anchored on the company holder, so an upstream /
+## other-contributor copyright never matches (its year is kept, only the marker
+## swapped). Malformed / rangeless outliers (a bare single year, a reversed or typo
+## range) are left with their year and normalized by hand in the per-package
+## 'reuse lint' + 'git diff' review the SCOPE above mandates -- deliberately NOT a
+## blind batch tool, so no per-file guard is carried here.
 spdx_reuse_convert_file() {
-   local file="${1}" email="${2}" tmp line
-   tmp="$(mktemp)"
-   while IFS= read -r line || [ -n "${line}" ]; do
-      spdx_reuse_convert_line "${line}" "${email}"
-   done < "${file}" > "${tmp}"
-   cat -- "${tmp}" > "${file}"
-   safe-rm --force -- "${tmp}"
+   local file="${1}" email="${2}"
+   ## Company author email -> the package's canonical domain. adrelanos is the
+   ## company (${spdx_reuse_holder}); a different handle is a separate contributor
+   ## and is left untouched.
+   str_replace "adrelanos@riseup.net" "${email}" "${file}"
+   str_replace "adrelanos@whonix.org" "${email}" "${file}"
+   str_replace "adrelanos@kicksecure.com" "${email}" "${file}"
+   ## Normalize the company copyright END year to the current year (only '- 2025'
+   ## needs it; '- 2026' is already current).
+   str_replace "- 2025 ${spdx_reuse_holder}" "- 2026 ${spdx_reuse_holder}" "${file}"
+   ## Drop the now-uniform company copyright year, one per start year.
+   str_replace "2012 - 2026 ${spdx_reuse_holder}" "${spdx_reuse_holder}" "${file}"
+   str_replace "2013 - 2026 ${spdx_reuse_holder}" "${spdx_reuse_holder}" "${file}"
+   str_replace "2014 - 2026 ${spdx_reuse_holder}" "${spdx_reuse_holder}" "${file}"
+   str_replace "2015 - 2026 ${spdx_reuse_holder}" "${spdx_reuse_holder}" "${file}"
+   str_replace "2016 - 2026 ${spdx_reuse_holder}" "${spdx_reuse_holder}" "${file}"
+   str_replace "2017 - 2026 ${spdx_reuse_holder}" "${spdx_reuse_holder}" "${file}"
+   str_replace "2018 - 2026 ${spdx_reuse_holder}" "${spdx_reuse_holder}" "${file}"
+   str_replace "2019 - 2026 ${spdx_reuse_holder}" "${spdx_reuse_holder}" "${file}"
+   str_replace "2020 - 2026 ${spdx_reuse_holder}" "${spdx_reuse_holder}" "${file}"
+   str_replace "2021 - 2026 ${spdx_reuse_holder}" "${spdx_reuse_holder}" "${file}"
+   str_replace "2022 - 2026 ${spdx_reuse_holder}" "${spdx_reuse_holder}" "${file}"
+   str_replace "2023 - 2026 ${spdx_reuse_holder}" "${spdx_reuse_holder}" "${file}"
+   str_replace "2024 - 2026 ${spdx_reuse_holder}" "${spdx_reuse_holder}" "${file}"
+   str_replace "2025 - 2026 ${spdx_reuse_holder}" "${spdx_reuse_holder}" "${file}"
+   str_replace "2026 - 2026 ${spdx_reuse_holder}" "${spdx_reuse_holder}" "${file}"
+   ## Legacy header markers -> SPDX tags.
+   str_replace "Copyright (C) " "SPDX-FileCopyrightText: " "${file}"
+   str_replace "See the file COPYING for copying conditions." \
+      "SPDX-License-Identifier: ${spdx_reuse_license_id}" "${file}"
 }
 
 ## Comment style for ADDING a header to a file that lacks one. Echoes one of:
