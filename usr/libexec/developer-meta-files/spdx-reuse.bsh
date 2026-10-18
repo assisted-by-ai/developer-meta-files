@@ -341,11 +341,16 @@ spdx_reuse_convert_tree() {
    ## follow it and clobber a file OUTSIDE the repo.
    for file in "${files[@]}"; do
       [ -L "${dir}/${file}" ] && continue
-      ## Never run the whole-file str_replace on this converter's OWN source: it
-      ## carries the marker/email literals as code (the has-header grep, the
-      ## str_replace arguments), so converting it would rewrite its own logic.
-      ## It already ships an SPDX header, so pass 2 / REUSE.toml leave it alone.
+      ## Skip non-source files that merely QUOTE a marker, so the whole-file
+      ## str_replace does not rewrite text that is not a license header:
+      ##  - COPYING / changelog.upstream: verbatim + generated (pass 2 and the
+      ##    REUSE.toml pass skip the same pair; a changelog quotes header lines in
+      ##    its commit messages).
+      ##  - this converter's OWN source: it carries the marker/email literals as
+      ##    code (the has-header grep, the str_replace arguments).
+      ## All already carry / get their license info elsewhere, so nothing is lost.
       case "${file}" in
+         COPYING | changelog.upstream | \
          usr/libexec/developer-meta-files/spdx-reuse.bsh)
             continue
             ;;
