@@ -341,6 +341,15 @@ spdx_reuse_convert_tree() {
    ## follow it and clobber a file OUTSIDE the repo.
    for file in "${files[@]}"; do
       [ -L "${dir}/${file}" ] && continue
+      ## Never run the whole-file str_replace on this converter's OWN source: it
+      ## carries the marker/email literals as code (the has-header grep, the
+      ## str_replace arguments), so converting it would rewrite its own logic.
+      ## It already ships an SPDX header, so pass 2 / REUSE.toml leave it alone.
+      case "${file}" in
+         usr/libexec/developer-meta-files/spdx-reuse.bsh)
+            continue
+            ;;
+      esac
       if spdx_reuse_file_has_kicksecure_header "${dir}/${file}"; then
          spdx_reuse_convert_file "${dir}/${file}" "${email}"
       fi
