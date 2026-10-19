@@ -75,15 +75,18 @@ dm_source_hash_record() {
 }
 
 ## Determine if a binary stanza's 'Architecture:' field covers a build target.
+## Evaluate each token with dpkg-architecture so every Debian architecture
+## wildcard (any, linux-any, any-amd64, ...) is matched, not just the plain and
+## linux-<arch> forms a hand-rolled case can enumerate. A missed wildcard would
+## make dm_package_artifacts_present skip the reprepro check and read a missing
+## .deb as present.
 dm_architecture_covers_target() {
    local architecture_field="$1" target="$2" token
    # shellcheck disable=SC2086
    for token in ${architecture_field}; do
-      case "${token}" in
-         any | linux-any | "${target}" | "linux-${target}")
-            return 0
-            ;;
-      esac
+      if dpkg-architecture --host-arch "${target}" --is "${token}"; then
+         return 0
+      fi
    done
    return 1
 }
