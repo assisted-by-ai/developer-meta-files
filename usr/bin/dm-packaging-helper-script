@@ -2485,6 +2485,13 @@ pkg_git_packages_git_log_writer() {
       done <<< "${commit_msg_full}"
    done < <(git --no-pager -c log.showSignature=false log -z \
       --pretty=tformat:'%H%n%an%n%s%n%B' "${git_log_range}")
+   ## Propagate a git log failure. Process substitution runs the producer
+   ## asynchronously, so its non-zero exit is otherwise masked and is
+   ## indistinguishable from a legit empty range -- the package would then
+   ## silently vanish from the release changelog. $! is the producer's PID
+   ## (the consumer is this current-shell while-loop; nothing in the body
+   ## backgrounds a job to clobber it), so keep wait DIRECTLY after done.
+   wait "$!" || die 1 "${FUNCNAME[0]}: git log failed for '${batch_current_package_reponame}' range '${git_log_range}'"
 
    if [ "${package_header_written}" = 'true' ]; then
       ## Add newline but only if there were actually changelog lines.
@@ -3012,6 +3019,12 @@ ${end_text}"
       if [ "${batch_meta_dry_run}" = 'true' ]; then
          log notice "[DRY-RUN] ${batch_current_package_reponame:-}: would write announcement ${announce_target}" >&2
       else
+         ## A derivative with no appended commits -- a --no-batch run on a
+         ## single package of the other project, or a release with zero commits
+         ## for this derivative -- leaves its giant_git_log.txt absent (rm'd at
+         ## setup, never recreated). Create it empty so the cat below does not
+         ## abort under errexit and leak announce_tmp.
+         [ -e "${changelog_file}" ] || touch -- "${changelog_file}"
          announce_tmp="$(mktemp)"
          cat <(printf '%s\n' "${announce_pre}" '') \
             "${changelog_file}" \
@@ -3142,8 +3155,22 @@ parse_args() {
    fi
 }
 
+## Sanity-check the old and new version tag names. These are derivative-maker
+## release tags, so resolve them in the dm repo EXPLICITLY: a --repo run has
+## already cd'd into a package dir, where an unqualified rev-parse would look for
+## a dm tag in the package repo and spuriously FATAL.
+verify_release_tags() {
+   local tag_ref
+   for tag_ref in "${derivative_version_old_main}" "${derivative_version_new_main}"; do
+      if ! git -C "${derivative_maker_source_code_dir}" rev-parse --quiet --verify "refs/tags/${tag_ref}^{commit}" >/dev/null 2>&1; then
+         printf '%s\n' "${red}${bold}FATAL ERROR:${reset} release tag 'refs/tags/${tag_ref}' does not resolve to a commit (check derivative_version_old_main / derivative_version_new_main)." >&2
+         exit 1
+      fi
+   done
+}
+
 main() {
-   local post_run_hook repo_path tag_ref
+   local post_run_hook repo_path
 
    parse_args "$@"
    batch_meta_dry_run="${parsed_dry_run}"
@@ -3183,13 +3210,7 @@ main() {
       cd -- "${repo_path}"
    fi
 
-   ## Sanity-check the old and new version tag names
-   for tag_ref in "${derivative_version_old_main}" "${derivative_version_new_main}"; do
-      if ! git rev-parse --quiet --verify "refs/tags/${tag_ref}^{commit}" >/dev/null 2>&1; then
-         printf '%s\n' "${red}${bold}FATAL ERROR:${reset} release tag 'refs/tags/${tag_ref}' does not resolve to a commit (check derivative_version_old_main / derivative_version_new_main)." >&2
-         exit 1
-      fi
-   done
+   verify_release_tags
 
    if [ "${parsed_mode}" = 'no-batch' ]; then
       set_batch_context_from_pwd
