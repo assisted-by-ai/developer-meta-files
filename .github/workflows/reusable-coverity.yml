@@ -144,12 +144,13 @@ jobs:
     ## decides whether we run CI in this org at all.
     ##
     ## ANDed with the fork-PR guard, matching every other PR-triggered
-    ## reusable: a no-op unless the caller routes pull_request events
-    ## into us, in which case it blocks PRs from forks (which must never
-    ## reach the secret-bearing Coverity steps on a checked-out PR ref).
+    ## reusable: a no-op unless the caller routes pull_request /
+    ## pull_request_target events into us, in which case it blocks PRs
+    ## from forks (which must never reach the secret-bearing Coverity
+    ## steps on a checked-out PR ref).
     if: >-
       vars.CI_ENABLED_ORG_AI_ASSISTED == 'true'
-      && (github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request')
+      && (github.event.pull_request.head.repo.full_name == github.repository || !startsWith(github.event_name, 'pull_request'))
     ## Pinned to ubuntu-24.04 so the apt-packaged yq (kislyuk's
     ## python-yq jq wrapper) remains stable across runner-image
     ## transitions; the config-load step's syntax depends on that

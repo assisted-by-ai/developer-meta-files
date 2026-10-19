@@ -61,7 +61,7 @@ jobs:
     ## consumes CI time. (agents/security.md, same as the other reusables.)
     if: >-
       vars.CI_ENABLED_ORG_AI_ASSISTED == 'true'
-      && (github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request')
+      && (github.event.pull_request.head.repo.full_name == github.repository || !startsWith(github.event_name, 'pull_request'))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
