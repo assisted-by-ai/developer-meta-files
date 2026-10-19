@@ -67,7 +67,7 @@ on:
           auto-resolves: the same-named COMPANION branch in dist-ai if it exists,
           else master -- so a coordinated dist-ai (tests) + consumer (behaviour)
           change travels under one branch name and is tested together (see the
-          resolve-dist-ai-ref action). Set only to force a specific ref.
+          resolve-companion-ref action). Set only to force a specific ref.
         required: false
         type: string
         default: ''
@@ -139,7 +139,7 @@ jobs:
       - name: Resolve dist-ai ref (companion branch, else master)
         id: resolve_dist_ai
         if: inputs.dist-ai-ref == ''
-        uses: org-ai-assisted/developer-meta-files/.github/actions/resolve-dist-ai-ref@master
+        uses: org-ai-assisted/developer-meta-files/.github/actions/resolve-companion-ref@master
 
       - name: Checkout dist-ai (test suites)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -185,12 +185,25 @@ jobs:
           ## submodules, and recursing multiplies the checkout for no coverage.
           git submodule update --init
 
+      - name: Resolve helper-scripts ref (companion branch, else master)
+        id: resolve_helper_scripts
+        if: steps.cfg.outputs.helper_scripts == 'true'
+        ## Same companion-branch resolution as dist-ai above (the action takes the
+        ## companion repo as an input). A coordinated helper-scripts (library) +
+        ## consumer change on one branch name is then tested together, instead of
+        ## the consumer running against helper-scripts@master -- which lacks the
+        ## branch's library changes and yields a false red (e.g. a standalone
+        ## regenerated from the branch's helper-scripts vs a master regen).
+        uses: org-ai-assisted/developer-meta-files/.github/actions/resolve-companion-ref@master
+        with:
+          repo: org-ai-assisted/helper-scripts
+
       - name: Checkout helper-scripts (for suites that drive its tools)
         if: steps.cfg.outputs.helper_scripts == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           repository: org-ai-assisted/helper-scripts
-          ref: master
+          ref: ${{ steps.resolve_helper_scripts.outputs.ref }}
           path: helper-scripts
           persist-credentials: false
 
