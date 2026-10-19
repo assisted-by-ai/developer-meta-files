@@ -91,6 +91,11 @@ esac
 
 ## ls-remote rather than the REST API: no token, no rate limit, and it
 ## answers the exact question (does this ref exist) without a checkout.
+##
+## Do NOT split ls-remote's exit status to fail-hard on a non-"no-match"
+## error: by design (see header) ANY probe failure -- a transient network
+## error included -- falls through to 'master', never reddening this
+## unrelated job.
 if git ls-remote --exit-code --branches -- \
       "${COMPANION_REMOTE_URL}" "refs/heads/${BRANCH_NAME}" \
       > /dev/null 2>&1
