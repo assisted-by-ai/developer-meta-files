@@ -12,6 +12,12 @@
 ## (precedence = "closest") for the uncommentable files only. The header rewrite is
 ## literal whole-string replacement via the `str_replace` tool, never sed regex, so
 ## a comment prefix and any same-line closer are preserved untouched.
+##
+## It REWRITES existing legacy headers (pass 1) and REPORTS comment-capable files
+## that still lack an SPDX header, but does NOT inject one -- a human adds the real
+## per-file header (the canonical curl/KDE norm), and 'reuse lint' stays the gate.
+## Deliberately so: guessing a comment SYNTAX per extension is what would corrupt a
+## polkit .rules (JavaScript) or fontconfig .conf (XML), so that guesser is gone.
 
 ## SCOPE (deliberate): for a single ENCRYPTED SUPPORT LLC / AGPL-3.0-or-later
 ## Kicksecure or Whonix package, run per package and VERIFY with `reuse lint` plus
@@ -113,27 +119,18 @@ spdx_reuse_convert_file() {
       "SPDX-License-Identifier: ${spdx_reuse_license_id}" "${file}"
 }
 
-## Comment style for ADDING a header to a file that lacks one. Echoes one of:
-## hash2 (## ), hash1 (# ), cblock (/* */), html (<!-- -->), none (uncommentable).
-spdx_reuse_comment_style() {
+## Can this file NOT carry an in-file SPDX header (so it must be annotated by
+## path in REUSE.toml instead)? True for binary/data files by extension and for
+## an extensionless file with no shebang. Deliberately NARROW and unambiguous:
+## this tool does NOT inject headers, so it never decides a COMMENT SYNTAX (the
+## old per-extension guesser mislabelled polkit .rules as shell and fontconfig
+## .conf as hash-config and would have corrupted them). An ambiguous
+## source/config file lacking a header is REPORTED for a human, not classified
+## here. (COPYING/LICENSES/debian/auto-generated-man-pages are handled by the
+## generic REUSE.toml globs and never reach this function.)
+spdx_reuse_is_uncommentable_data() {
    local file="${1}" base ext first
    base="${file##*/}"
-   case "${base}" in
-      COPYING | changelog.upstream)
-         printf '%s\n' none
-         return 0
-         ;;
-      .gitignore | .gitattributes | Makefile | Dockerfile)
-         printf '%s\n' hash2
-         return 0
-         ;;
-   esac
-   case "${file}" in
-      LICENSES/* | */LICENSES/* | debian/* | */debian/* | auto-generated-man-pages/* | */auto-generated-man-pages/*)
-         printf '%s\n' none
-         return 0
-         ;;
-   esac
    ext=""
    case "${base}" in
       *.*)
@@ -141,106 +138,30 @@ spdx_reuse_comment_style() {
          ;;
    esac
    case "${ext}" in
-      py)
-         printf '%s\n' hash1
-         return 0
-         ;;
-      sh | bash | bsh | yaml | yml | conf | service | socket | timer | mount | target | path | cfg | ini | desktop | mk | marker | rules | list | sources)
-         printf '%s\n' hash2
-         return 0
-         ;;
-      c | h | cpp | cc | hpp | js | css)
-         printf '%s\n' cblock
-         return 0
-         ;;
-      md | ronn | html | htm | xml | svg | xsl)
-         printf '%s\n' html
-         return 0
-         ;;
       txt | png | jpg | jpeg | gif | ico | pdf | gz | xz | zst | deb | bin | dat)
-         printf '%s\n' none
          return 0
          ;;
    esac
-   ## Extensionless: a shebang marks a script (hash); otherwise uncommentable.
-   if [ -z "${ext}" ] && IFS= read -r first < "${file}" 2>/dev/null; then
+   ## Extensionless, but a known hash-comment file -> comment-capable, report it.
+   case "${base}" in
+      Makefile | Dockerfile)
+         return 1
+         ;;
+   esac
+   ## Other extensionless: a shebang marks a script (comment-capable -> report
+   ## it); otherwise treat as uncommentable data.
+   if [ -z "${ext}" ]; then
+      IFS= read -r first < "${file}" 2>/dev/null || first=""
       case "${first}" in
          '#!'*)
-            printf '%s\n' hash2
+            return 1
+            ;;
+         *)
             return 0
             ;;
       esac
    fi
-   printf '%s\n' none
-}
-
-## Echo a hash-style header insertion for a file. A shebang stays line 1 (blank
-## line after), the header follows; otherwise the header goes at the very top.
-spdx_reuse__emit_hash() {
-   local file="${1}" email="${2}" p="${3}" first
-   IFS= read -r first < "${file}" 2>/dev/null || first=""
-   case "${first}" in
-      '#!'*)
-         printf '%s\n' "${first}" ""
-         printf '%s\n' "${p}SPDX-FileCopyrightText: ${spdx_reuse_holder} <${email}>"
-         printf '%s\n' "${p}SPDX-License-Identifier: ${spdx_reuse_license_id}" ""
-         tail -n +2 -- "${file}"
-         ;;
-      *)
-         printf '%s\n' "${p}SPDX-FileCopyrightText: ${spdx_reuse_holder} <${email}>"
-         printf '%s\n' "${p}SPDX-License-Identifier: ${spdx_reuse_license_id}" ""
-         cat -- "${file}"
-         ;;
-   esac
-}
-
-## Echo a block-comment header insertion (open/close markers) prepended to a file.
-## A leading shebang (a JS tool) or XML/processing-instruction declaration MUST
-## stay on line 1, so the block goes after it.
-spdx_reuse__emit_block() {
-   local file="${1}" email="${2}" open="${3}" close="${4}" first
-   IFS= read -r first < "${file}" 2>/dev/null || first=""
-   case "${first}" in
-      '#!'* | '<?'*)
-         printf '%s\n' "${first}"
-         printf '%s\n' "${open}"
-         printf '%s\n' "SPDX-FileCopyrightText: ${spdx_reuse_holder} <${email}>"
-         printf '%s\n' "SPDX-License-Identifier: ${spdx_reuse_license_id}"
-         printf '%s\n' "${close}" ""
-         tail -n +2 -- "${file}"
-         ;;
-      *)
-         printf '%s\n' "${open}"
-         printf '%s\n' "SPDX-FileCopyrightText: ${spdx_reuse_holder} <${email}>"
-         printf '%s\n' "SPDX-License-Identifier: ${spdx_reuse_license_id}"
-         printf '%s\n' "${close}" ""
-         cat -- "${file}"
-         ;;
-   esac
-}
-
-## Add an SPDX header to a comment-capable file that lacks one (no-op for 'none').
-spdx_reuse_add_header() {
-   local file="${1}" email="${2}" style tmp
-   style="$(spdx_reuse_comment_style "${file}")"
-   [ "${style}" = none ] && return 0
-   tmp="$(mktemp)"
-   case "${style}" in
-      hash1)
-         spdx_reuse__emit_hash "${file}" "${email}" "# " > "${tmp}"
-         ;;
-      hash2)
-         spdx_reuse__emit_hash "${file}" "${email}" "## " > "${tmp}"
-         ;;
-      cblock)
-         spdx_reuse__emit_block "${file}" "${email}" '/*' '*/' > "${tmp}"
-         ;;
-      html)
-         spdx_reuse__emit_block "${file}" "${email}" '<!--' '-->' > "${tmp}"
-         ;;
-   esac
-   cat -- "${tmp}" > "${file}"
-   safe-rm --force -- "${tmp}"
+   return 1
 }
 
 ## Drop years (and normalize the company email) in debian/copyright's DEP-5
@@ -319,7 +240,7 @@ spdx_reuse_generate_toml() {
 
 ## Orchestrate a whole package tree. Returns the exit status of 'reuse lint'.
 spdx_reuse_convert_tree() {
-   local dir="${1}" email file style real extra=() files=()
+   local dir="${1}" email file real extra=() files=() missing_header_count=0
    if [ ! -d "${dir}" ]; then
       printf '%s\n' "ERROR: not a directory: ${dir}" >&2
       return 1
@@ -360,22 +281,40 @@ spdx_reuse_convert_tree() {
       fi
    done
 
-   ## Pass 2: add a header to each comment-capable file still lacking one.
-   ## comment_style gets the FULL path so its shebang probe reads the real file
-   ## regardless of the caller's cwd.
+   ## Pass 2: REPORT each comment-capable file still lacking a header. This tool
+   ## does NOT inject headers (no comment-syntax guessing, no file mutation) -- a
+   ## human adds a real per-file SPDX header. The final 'reuse lint' is the gate
+   ## and stays red until they do. Binary/data + extensionless-non-script files
+   ## cannot hold a header and are handled by REUSE.toml below, so they are not
+   ## reported.
    for file in "${files[@]}"; do
       [ -L "${dir}/${file}" ] && continue
+      case "${file}" in
+         COPYING | changelog.upstream | REUSE.toml | \
+         usr/libexec/developer-meta-files/spdx-reuse.bsh)
+            continue
+            ;;
+         LICENSES/* | debian/* | auto-generated-man-pages/*)
+            continue
+            ;;
+      esac
       spdx_reuse_has_spdx "${dir}/${file}" && continue
-      style="$(spdx_reuse_comment_style "${dir}/${file}")"
-      [ "${style}" = none ] && continue
-      spdx_reuse_add_header "${dir}/${file}" "${email}"
+      spdx_reuse_is_uncommentable_data "${dir}/${file}" && continue
+      printf '%s\n' "SPDX header MISSING (add one manually): ${file}" >&2
+      missing_header_count=$((missing_header_count + 1))
    done
+   if [ "${missing_header_count}" -gt 0 ]; then
+      printf '%s\n' "${missing_header_count} file(s) need a per-file SPDX header added by hand; 'reuse lint' will flag them until then." >&2
+   fi
 
    ## DEP-5 year drop.
    spdx_reuse_fix_dep5_copyright "${dir}/debian/copyright" "${email}"
 
-   ## Uncommentable leftovers (and every symlink -- never header-written) not
-   ## covered by the generic globs go into REUSE.toml so 'reuse lint' stays green.
+   ## REUSE.toml leftovers: only files that CANNOT carry an in-file header --
+   ## every symlink (never header-written) and binary/data (and extensionless
+   ## non-script) files. Comment-capable files lacking a header are NOT swept in
+   ## here: they were reported in pass 2 and must get a real per-file header, so
+   ## 'reuse lint' keeps flagging them.
    for file in "${files[@]}"; do
       case "${file}" in
          COPYING | changelog.upstream | REUSE.toml)
@@ -385,12 +324,14 @@ spdx_reuse_convert_tree() {
             continue
             ;;
       esac
-      ## A symlink is never given a header (pass 1/2 skip it), so always annotate
-      ## it by path; do not consult has_spdx, which would follow the link.
-      if [ ! -L "${dir}/${file}" ] && spdx_reuse_has_spdx "${dir}/${file}"; then
+      ## A symlink is never given a header, so always annotate it by path; do not
+      ## consult has_spdx, which would follow the link.
+      if [ -L "${dir}/${file}" ]; then
+         extra+=("${file}")
          continue
       fi
-      extra+=("${file}")
+      spdx_reuse_has_spdx "${dir}/${file}" && continue
+      spdx_reuse_is_uncommentable_data "${dir}/${file}" && extra+=("${file}")
    done
 
    spdx_reuse_generate_toml "${dir}" "${email}" "${extra[@]}"
