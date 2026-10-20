@@ -121,7 +121,13 @@ spdx_reuse_convert_file() {
 
 ## Can this file NOT carry an in-file SPDX header (so it must be annotated by
 ## path in REUSE.toml instead)? True for binary/data files by extension and for
-## an extensionless file with no shebang. Deliberately NARROW and unambiguous:
+## an extensionless file with no shebang. The extension list adds ONLY '.gpg':
+## binary OpenPGP (keyring / key / encrypted blob) that no source ecosystem uses
+## and reuse has no comment style for. Extensions that ALSO name a source language
+## are EXCLUDED even when usually binary -- .asc (AsciiDoc), .sig (Standard ML),
+## .mo (Modelica), .json (tsconfig / JSONC) -- because reuse reads an inline SPDX
+## tag from them, so a headerless one is REPORTED, never blanket-annotated with
+## the wrong license. Deliberately NARROW and unambiguous:
 ## this tool does NOT inject headers, so it never decides a COMMENT SYNTAX (the
 ## old per-extension guesser mislabelled polkit .rules as shell and fontconfig
 ## .conf as hash-config and would have corrupted them). An ambiguous
@@ -138,7 +144,7 @@ spdx_reuse_is_uncommentable_data() {
          ;;
    esac
    case "${ext}" in
-      txt | png | jpg | jpeg | gif | ico | pdf | gz | xz | zst | deb | bin | dat)
+      txt | png | jpg | jpeg | gif | ico | pdf | gz | xz | zst | deb | bin | dat | gpg)
          return 0
          ;;
    esac
