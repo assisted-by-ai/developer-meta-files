@@ -137,7 +137,18 @@ dm_package_artifacts_present() {
             return 1
          fi
       done
-   done < <(grep-dctrl -F 'Package' --pattern='' -s Package,Architecture -n "${control_file}" \
+   ## Normalize CRLF line endings to LF BEFORE grep-dctrl: a CRLF-edited
+   ## debian/control has '\r\n' on every line, including the blank paragraph
+   ## separator, whose lone '\r' grep-dctrl reads as a field with no colon -- it
+   ## aborts and emits nothing, forcing a needless rebuild. Dropping the EOL '\r'
+   ## also removes a stray CR on a field value ('Architecture: all\r') that would
+   ## otherwise defeat the 'all' fast-path and the arch match above, silently
+   ## skipping the reprepro check and reading a missing .deb as present. Only the
+   ## end-of-line CR is removed ('s/\r$//', not every '\r'), so a CR embedded in or
+   ## leading a value is left for grep-dctrl to reject, never silently reshaping a
+   ## field or a package name.
+   done < <(sed 's/\r$//' "${control_file}" \
+      | grep-dctrl -F 'Package' --pattern='' -s Package,Architecture -n \
       | sed -z 's/\n\([^\n]\)/\t\1/g; s/\n\t/\n/g; s/\n$//')
 
    ## Force a rebuild if a source package seems to declare no binary packages.
