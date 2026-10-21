@@ -54,8 +54,10 @@ main() {
    fi
 
    ## This file doesn't include Whonix's APT repository.
-   cp -- "${source_code_folder_dist}/packages/kicksecure/anon-apt-sources-list/etc/apt/sources.list.d/debian.sources" "${CHROOT_FOLDER}/etc/apt/sources.list.d/debian.sources"
-   chmod o+r -- "${CHROOT_FOLDER}/etc/apt/sources.list.d/debian.sources"
+   ## CHROOT_FOLDER is the root-owned mounted image fs; this tool runs as the
+   ## unprivileged build user, so the write needs SUDO_TO_ROOT.
+   ${SUDO_TO_ROOT} cp -- "${source_code_folder_dist}/packages/kicksecure/anon-apt-sources-list/etc/apt/sources.list.d/debian.sources" "${CHROOT_FOLDER}/etc/apt/sources.list.d/debian.sources"
+   ${SUDO_TO_ROOT} chmod o+r -- "${CHROOT_FOLDER}/etc/apt/sources.list.d/debian.sources"
 
    "${dist_source_help_steps_folder}/create-local-temp-apt-repo" "$@"
 
