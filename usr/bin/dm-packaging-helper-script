@@ -2206,8 +2206,15 @@ pkg_git_manpages() {
    dry_run_or_run genmkfile manpages
 
    msg='re-generate man pages (generated using "genmkfile manpages")'
-   dry_run_or_run git add -- 'man'/* || true
-   dry_run_or_run git add -- 'auto-generated-man-pages'/* || true
+   ## Stage the whole dir, not a 'man'/* glob: the glob misses dotfiles and
+   ## tracked-file DELETIONS, leaving the worktree out of sync with the index.
+   ## git_commit_pathspecs then commits with 'git commit -- <dir>' (git commit
+   ## --only, which records the WORKTREE for the pathspec), so an index that
+   ## lags the worktree would drop a deletion or commit an unstaged edit. Adding
+   ## the dir wholesale keeps index == worktree so the commit is exactly the
+   ## staged state.
+   dry_run_or_run git add -- 'man' || true
+   dry_run_or_run git add -- 'auto-generated-man-pages' || true
    git_commit_pathspecs "${msg}" 'man' 'auto-generated-man-pages'
    dry_run_or_run git status
    return 0
