@@ -6,15 +6,45 @@ Companion to [github-org-tools.md](github-org-tools.md). The kind
 names here are the values `org_kind()` returns, so this document and
 the code share one vocabulary.
 
-The five roles are:
+The six roles are:
 
 | Role | Where it lives | Tool that touches it |
 | --- | --- | --- |
 | SOURCE | Kicksecure, Whonix orgs | dm-github-org-policy, kind=source |
 | MIRROR | org-ai-assisted org | dm-github-org-policy, kind=mirror |
-| PROJECT | secure-terminal, output-lies orgs | dm-github-org-policy, kind=project |
+| PROJECT | secure-terminal, output-lies, computer-security-research orgs | dm-github-org-policy, kind=project |
+| STAGE | kicksecure-stage, whonix-stage orgs | dm-github-org-policy, kind=stage |
 | PERSON | PERSON_USERS array | dm-github-personal-policy, target_kind=person |
 | BOT | BOT_USERS array | dm-github-personal-policy, target_kind=bot |
+
+STAGE is a sixth role for the orgs that each host one generated
+`<org>.github.io` repo serving the noindex STAGING build of the wiki.
+It is a published mirror of content maintained elsewhere (the wiki, via
+git-mediawiki - there is no upstream GitHub repo to file against), runs
+no CI (the Pages legacy branch build needs no Actions), and is pushed by
+the bot. So its profile is MIRROR's repo body (issues/wiki/projects/
+discussions off, secret-scan on), MIRROR's Dependabot stance (all three
+switches OFF - no CI to act on a bump), MIRROR's ruleset (deletion +
+non_fast_forward, NO required_signatures - the bot's deploy pushes carry
+no matching GPG key), PVR off (same as everyone), and SOURCE's org-wide
+Actions-disabled (`enabled_repositories=none`). The one axis where it
+differs from MIRROR is Actions: STAGE disables them entirely, MIRROR
+keeps them on behind the allow-list.
+
+## Registration drift is a finding
+
+An org the bot can write to but that is in none of the `*_ORGS` arrays
+is silently SKIPPED by `--apply`, so it sits unhardened with nothing
+reporting the gap - which is how kicksecure-stage, whonix-stage and
+computer-security-research went unmanaged until a human noticed. On the
+default-scope path (no `ORGS_OVERRIDE`), `dm-github-org-policy` now reads
+`GET /user/memberships/orgs`, keeps the `role=admin` + `state=active`
+orgs, and reports any admin org missing from MIRROR/PROJECT/STAGE_ORGS as
+`UNREGISTERED` and any registered org the bot is not admin of as `STALE`.
+Either is a finding (fails `--audit`, warns on `--apply`/`--dry-run`).
+`ORGS_OVERRIDE` skips the check: a deliberately narrowed scope is not an
+account-wide registration statement. SOURCE is member-only and
+intentionally excluded from the writable registered set.
 
 The distinction that drives every diff below is whether the code has
 somewhere ELSE to be maintained:
