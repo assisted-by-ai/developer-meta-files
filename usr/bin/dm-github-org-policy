@@ -892,33 +892,49 @@ apply_repo_policy() {
 ## policy_warn_seen for --apply/--dry-run); each mode's main() reads the
 ## one that matters to it.
 check_registration_drift() {
-   local result status body admin_csv registered_csv line org
-   local -a registered_all
+   local result status body admin_csv registered_csv line org page count page_logins
+   local -a registered_all admin_logins
 
    [ -z "${ORGS_OVERRIDE:-}" ] || return 0
-
-   result="$(ghorg_api GET '/user/memberships/orgs?per_page=100')" || {
-      log warn 'registration drift: <api error> reading /user/memberships/orgs -- NOT VERIFIED'
-      audit_findings=$(( audit_findings + 1 ))
-      policy_warn_seen=1
-      return 0
-   }
-   status="$(ghorg_status_of "${result}")"
-   if [ "${status}" != '200' ]; then
-      log warn "registration drift: HTTP ${status} reading /user/memberships/orgs (need admin:org) -- NOT VERIFIED"
-      audit_findings=$(( audit_findings + 1 ))
-      policy_warn_seen=1
-      return 0
-   fi
-   body="$(ghorg_body_of "${result}")"
 
    ## Writable orgs only: admin role + active membership. A 'member' org
    ## (Kicksecure / Whonix) is not writable, is deliberately out of the
    ## applied set, and must not read as drift.
-   admin_csv="$(printf '%s' "${body}" \
-      | ghorg_jq_capped --raw-output -- \
-        '[.[] | select(.role == "admin" and .state == "active") | .organization.login] | join(",")')" \
-      || admin_csv=''
+   ##
+   ## Paginated (mirrors ghorg_list_repos): a single per_page=100 page would
+   ## drop a registered org onto page 2 once the bot belongs to >100 orgs,
+   ## misreporting it as STALE and missing a page-2 unregistered org -- the
+   ## exact failure mode this check exists to catch.
+   admin_logins=()
+   page=1
+   while [ "${page}" -le "${GHORG_MAX_PAGES}" ]; do
+      result="$(ghorg_api GET "/user/memberships/orgs?per_page=100&page=${page}")" || {
+         log warn 'registration drift: <api error> reading /user/memberships/orgs -- NOT VERIFIED'
+         audit_findings=$(( audit_findings + 1 ))
+         policy_warn_seen=1
+         return 0
+      }
+      status="$(ghorg_status_of "${result}")"
+      if [ "${status}" != '200' ]; then
+         log warn "registration drift: HTTP ${status} reading /user/memberships/orgs (need admin:org) -- NOT VERIFIED"
+         audit_findings=$(( audit_findings + 1 ))
+         policy_warn_seen=1
+         return 0
+      fi
+      body="$(ghorg_body_of "${result}")"
+      count="$(printf '%s' "${body}" | ghorg_jq_capped -- 'length')"
+      [ "${count}" = '0' ] && break
+      page_logins="$(printf '%s' "${body}" \
+         | ghorg_jq_capped --raw-output -- \
+           '.[] | select(.role == "admin" and .state == "active") | .organization.login')"
+      while IFS= read -r line; do
+         [ -z "${line}" ] && continue
+         admin_logins+=( "${line}" )
+      done <<< "${page_logins}"
+      [ "${count}" -lt 100 ] && break
+      page=$(( page + 1 ))
+   done
+   admin_csv="$(IFS=','; printf '%s' "${admin_logins[*]:-}")"
 
    ## The writable set this tool applies policy to. SOURCE is member-only
    ## (declarative, commented out of ORGS), so it is excluded here too.
