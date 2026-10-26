@@ -64,12 +64,13 @@ org that is not SOURCE".
 
 A second axis cuts across the first, and Dependabot follows the
 SECOND one, not the first: **where does the CI that acts on the
-report run?** SOURCE has Actions disabled org-wide
-(`enabled_repositories=none`), and the PROJECT repos are mirrored
-into `org-ai-assisted`, where the AI-assisted test and scanner
-suites run. `org-ai-assisted` is therefore the one place a bump PR
-can carry a verdict and a CVE alert has a build to fix it in, so
-Dependabot is ON on MIRROR only and actively OFF on every other kind.
+report run?** SOURCE and STAGE disable Actions org-wide
+(`enabled_repositories=none`), so a bump PR there can never carry a
+verdict -- all Dependabot is off on those kinds. MIRROR and PROJECT
+both keep Actions on, so a version-bump PR is CI-verifiable there and
+VERSION updates are allowed on both (opt-in per repo). ALERTS and
+SECURITY updates stay centralized on MIRROR only, so one CVE inbox is
+not split between a PROJECT repo and its org-ai-assisted mirror.
 See "Dependabot lives on the mirror only" below.
 
 ## Free-plan code-security replacements
@@ -214,8 +215,12 @@ to the policy but which have **no documented REST setter** as of
 applies to, so the operator can complete each flip via the UI.
 
 The emitting kind is per row -- a flip is emitted where its subject
-exists. The three Dependabot rows are MIRROR only, because MIRROR is
-the only kind with Dependabot alerts or security-update PRs at all.
+exists. The alert / security-update flips (grouping, auto-triage,
+delegated dismissal) are MIRROR only, because MIRROR is the only kind
+with Dependabot alerts or security-update PRs at all. The
+version-updates row (delete `.github/dependabot.yml`) is the exception:
+it is emitted on SOURCE and STAGE, the kinds that must NOT carry the
+file (Actions off); MIRROR and PROJECT keep Actions on and allow it.
 
 | Setting | Scope | Emitted on | Desired | Why moot elsewhere |
 | --- | --- | --- | --- | --- |
@@ -409,12 +414,14 @@ could not be read - an unread endpoint is never a pass):
   counterpart of the literal `--apply` PUTs.
 - MIRROR: alerts must read enabled
   (`GET /vulnerability-alerts` -> HTTP 204).
-- SOURCE + PROJECT: security updates must read `enabled: false`,
+- SOURCE + PROJECT + STAGE: security updates must read `enabled: false`,
   against `POLICY_REPO_DEPENDABOT_FIXES_EXPECT_OFF`. With the current
   member token that endpoint answers 404 on SOURCE, so this reports
   NOT VERIFIED -- honestly, since the state genuinely is unknown.
-- SOURCE + PROJECT: `.github/dependabot.yml` must be ABSENT. Present
-  is reported as drift.
+- SOURCE + STAGE: `.github/dependabot.yml` must be ABSENT (Actions off
+  org-wide -> no CI can verify a bump PR); present is drift. MIRROR and
+  PROJECT keep Actions on, so a present file is a verifiable opt-in, not
+  drift.
 - EVERY kind: a `dependabot.yml` probe answering neither 200 nor 404
   is reported as NOT VERIFIED, MIRROR included, where either answer
   would otherwise be in policy. Reading "could not tell" as "absent"
