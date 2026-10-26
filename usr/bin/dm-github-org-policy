@@ -722,11 +722,12 @@ audit_org_state() {
    ## org-level Dependabot alerts enabled, repos missing the file
    ## still fail Scorecard.
    ##
-   ## Off the mirror the same probe is a POLICY CHECK, not an inventory
-   ## line: the file IS the version-update switch and only MIRROR may
-   ## carry one, because only MIRROR runs the CI that verifies the bump
-   ## PRs it opens. On MIRROR the file is opt-in per repo (see
-   ## dm-packaging-helper-script), so either answer is in policy there.
+   ## On SOURCE and STAGE the same probe is a POLICY CHECK, not an inventory
+   ## line: the file IS the version-update switch, and those kinds disable
+   ## Actions org-wide, so a bump PR there can never carry a CI verdict --
+   ## the file must be absent. MIRROR and PROJECT both keep Actions on, so a
+   ## bump PR is verifiable and the file is allowed (opt-in per repo, see
+   ## dm-packaging-helper-script); either answer is in policy there.
    ## Archived repos are outside this enumeration; Dependabot does not
    ## run on them, so a leftover config there is inert until the repo is
    ## un-archived.
@@ -750,8 +751,12 @@ audit_org_state() {
             200)
                have_count=$(( have_count + 1 ))
                log notice "    yes: ${org}/${repo}"
-               if [ "${audit_kind}" != 'mirror' ]; then
-                  log warn "    ${org}/${repo}: DRIFT from policy: Dependabot version updates are ON (${POLICY_DEPENDABOT_VERSION_UPDATES_OFF_PATH} present); only the mirror org has CI to verify the PRs they open"
+               ## Version updates are allowed where Actions/CI runs to verify the
+               ## bump PRs: MIRROR and PROJECT (both keep Actions on). Drift only
+               ## on SOURCE and STAGE, where Actions are disabled org-wide so a
+               ## bump PR can never carry a CI verdict.
+               if [ "${audit_kind}" = 'source' ] || [ "${audit_kind}" = 'stage' ]; then
+                  log warn "    ${org}/${repo}: DRIFT from policy: Dependabot version updates are ON (${POLICY_DEPENDABOT_VERSION_UPDATES_OFF_PATH} present); Actions are disabled org-wide here, so no CI can verify the bump PRs they open"
                   audit_findings=$(( audit_findings + 1 ))
                fi
                ;;
@@ -868,11 +873,14 @@ apply_repo_policy() {
       policy_skip_ui_repo "${owner}" "${repo}" AUTO_TRIAGE_DISMISS_DEV
       policy_skip_ui_repo "${owner}" "${repo}" AUTO_TRIAGE_DISMISS_MALWARE
       policy_skip_ui_repo "${owner}" "${repo}" DELEGATED_DISMISSAL
-   else
+   elif [ "${kind}" = 'source' ] || [ "${kind}" = 'stage' ]; then
       ## Dependabot VERSION updates have no REST setter at any scope: the
       ## presence of .github/dependabot.yml is the switch, so turning them
       ## off means a commit that deletes the file. Emitted per repo
-      ## because that is the granularity the fix has.
+      ## because that is the granularity the fix has. Only SOURCE and STAGE
+      ## must be absent (Actions off -> no CI to verify a bump PR); PROJECT
+      ## keeps Actions on, so version updates are allowed there and no
+      ## delete-the-file notice is emitted.
       policy_skip_ui_repo "${owner}" "${repo}" DEPENDABOT_VERSION_UPDATES_OFF
    fi
 }

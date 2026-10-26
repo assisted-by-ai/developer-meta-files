@@ -82,7 +82,7 @@ tested on Free 2026-05.
 | --- | --- | --- | --- | --- | --- |
 | Dependabot alerts (`PUT /vulnerability-alerts` on MIRROR, `DELETE` elsewhere) | actively disabled | **on** | actively disabled | off | off |
 | Dependabot security updates (`PUT /automated-security-fixes` on MIRROR, `DELETE` elsewhere) | actively disabled | **on** | actively disabled | off | off |
-| Dependabot version updates (no REST setter; `.github/dependabot.yml` presence IS the switch) | must be absent | opt-in per repo | must be absent | - | - |
+| Dependabot version updates (no REST setter; `.github/dependabot.yml` presence IS the switch) | must be absent | opt-in per repo | opt-in per repo (Actions on) | - | - |
 | Private vulnerability reporting (PVR) | actively disabled | actively disabled | actively disabled | off | off |
 | `secret_scanning` + push protection (in PATCH body) | on | on | on | on | on |
 | Branch + tag rulesets (`POST /repos/{}/{}/rulesets`) | on | on | on | on | on |
@@ -191,14 +191,14 @@ Net deliberate diffs after this split:
    selected-actions allow-list - it is where the AI-assisted test +
    scanner suites run. The canonical SOURCE repos run their own CI,
    not GitHub Actions.
-5. Dependabot -- all three switches -- on MIRROR only, actively
-   disabled on SOURCE and PROJECT. It follows GitHub Actions, and
-   Actions runs on `org-ai-assisted` alone. PVR (Private
-   Vulnerability Reporting) actively disabled everywhere except
-   PROJECT, because the canonical disclosure channel is the wiki (per
-   `.github/SECURITY.md`), not GitHub's PVR flow. The two do NOT
-   share a pivot: Dependabot follows CI, PVR follows who receives a
-   researcher's report.
+5. Dependabot alerts + security updates on MIRROR only; version
+   updates follow CI (allowed on MIRROR and PROJECT, which both keep
+   Actions on; absent on SOURCE and STAGE, which disable Actions
+   org-wide). PVR (Private Vulnerability Reporting) actively disabled
+   on EVERY kind, PROJECT included, because the canonical disclosure
+   channel is the wiki (per `.github/SECURITY.md`), not GitHub's PVR
+   flow. The two do NOT share a pivot: Dependabot follows CI, PVR
+   follows who receives a researcher's report.
 6. GitHub Pages cleanup (DELETE) only on PERSON/BOT.
 
 Everything else (fork-PR approval policy, workflow GITHUB_TOKEN
@@ -224,7 +224,7 @@ the only kind with Dependabot alerts or security-update PRs at all.
 | Auto-triage rule "Dismiss low-impact dev-scoped" preset | repo | MIRROR | **off** | Alerts off everywhere else; none to triage |
 | Auto-triage rule "Dismiss package malware alerts" preset | repo | MIRROR | **off** | Alerts off; no malware alerts to (not-)dismiss |
 | Delegated Dependabot alert dismissal ("Prevent direct alert dismissals") | repo | MIRROR | **on** | Alerts off; no dismissals to delegate |
-| Dependabot version updates (delete `.github/dependabot.yml`) | repo | SOURCE, PROJECT | **off** | Not a UI flip at all -- the fix is a commit; listed here because it shares the "no REST setter" shape. See "Dependabot lives on the mirror only" below |
+| Dependabot version updates (delete `.github/dependabot.yml`) | repo | SOURCE, STAGE | **off** | Not a UI flip at all -- the fix is a commit; listed here because it shares the "no REST setter" shape. Only SOURCE and STAGE (Actions off) must delete it; PROJECT keeps Actions on, so version updates are allowed there. See "Dependabot lives on the mirror only" below |
 
 Rationale per setting:
 
@@ -259,19 +259,25 @@ Rationale per setting:
 
 ## Dependabot lives on the mirror only (decision 2026-07-31)
 
-**Decision: Dependabot runs on `org-ai-assisted` and nowhere else.
-Alerts, security updates and version updates are all OFF on
-Kicksecure, Whonix and the PROJECT orgs.**
+**Decision: Dependabot ALERTS and SECURITY updates run on
+`org-ai-assisted` (MIRROR) only -- centralized so one CVE inbox is not
+split across a repo and its mirror. VERSION updates
+(`.github/dependabot.yml`) follow CI instead: allowed wherever Actions
+runs to verify a bump PR -- MIRROR and PROJECT -- and must be absent on
+SOURCE and STAGE, which disable Actions org-wide.**
 
 Why: every Dependabot output -- an alert, a security-update PR, a
 version-bump PR -- only becomes work somebody can finish where CI can
 build and test the result, and where merging it is the normal
-workflow. SOURCE has GitHub Actions disabled org-wide by deliberate
-policy (the canonical repos run their own CI - see the CI / Actions
-row above), so a bump PR raised there can never carry a verdict. The
-PROJECT repos are mirrored into `org-ai-assisted`, which is where the
-AI-assisted test and scanner suites run, so Dependabot output on the
-PROJECT side only splits one alert inbox and one bump stream in two.
+workflow. SOURCE and STAGE have GitHub Actions disabled org-wide by
+deliberate policy (the canonical repos run their own CI - see the CI /
+Actions row above; a STAGE org serves a Pages legacy build), so a bump
+PR raised there can never carry a verdict -- version updates must be
+absent. MIRROR and PROJECT both keep Actions on, so a version-bump PR
+is verifiable by the repo's own CI and `.github/dependabot.yml` is
+allowed (opt-in per repo). Alerts and security updates stay centralized
+on MIRROR regardless: routing a CVE inbox to both a PROJECT repo and
+its org-ai-assisted mirror would only split it in two.
 An unverifiable PR stream is worse than no PR stream: it costs review
 attention and produces a green-looking merge button backed by
 nothing.
