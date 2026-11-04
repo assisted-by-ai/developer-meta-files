@@ -36,7 +36,9 @@ sign_cmd_signify() {
    ## To create a key for signify-openbsd, see:
    ## derivative-maker help-steps/signing-key-create
    ## https://forums.whonix.org/t/signify-openbsd/7842
-   signify-openbsd -S -s "${signify_private_key}" -m "$1" -x "$2"
+   ## $3: optional extra signify flag (e.g. -e for an embedded signature).
+   # shellcheck disable=SC2086
+   signify-openbsd -S -s "${signify_private_key}" -m "$1" -x "$2" ${3:-}
    ## Sanity test.
    test -f "$2"
 }
@@ -49,28 +51,27 @@ verify_cmd_openpgp() {
 }
 
 verify_cmd_signify() {
-   signify-openbsd -V -p "${signify_public_key}" -m "$1" -x "$2"
+   ## $3: optional extra signify flag (e.g. -e for an embedded signature).
+   # shellcheck disable=SC2086
+   signify-openbsd -V -p "${signify_public_key}" -m "$1" -x "$2" ${3:-}
 }
 
-sign_and_verify() {
+sign_and_verify_openpgp() {
    sign_cmd_openpgp "${1}" "${1}.asc" || return
    verify_cmd_openpgp "${1}" "${1}.asc" || return
-   ## This function used to call signify also, so delete any stale signify
-   ## signature.
-   safe-rm -f -- "${1}.sig" || return
 }
 
-sign_and_verify_signify() {
-   sign_and_verify "${1}" || return
+sign_and_verify_all() {
+   sign_and_verify_openpgp "${1}" || return
    sign_cmd_signify "${1}" "${1}.sig" || return
    verify_cmd_signify "${1}" "${1}.sig" || return
 }
 
-verify_signature() {
+verify_signature_openpgp() {
    verify_cmd_openpgp "${1}" "${1}.asc" || return
 }
 
-verify_signature_signify() {
-   verify_signature "${1}" || return
+verify_signature_all() {
+   verify_signature_openpgp "${1}" || return
    verify_cmd_signify "${1}" "${1}.sig" || return
 }
