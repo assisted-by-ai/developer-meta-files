@@ -1547,22 +1547,28 @@ the SC2174 case. Being `install`, not `mkdir`, it never trips SC2174, so
 no `# shellcheck disable=SC2174` is needed. `install -d` is idempotent
 (like `mkdir --parents`): it succeeds when the directory already exists.
 
-`pre-push-fix` rewrites only the mechanical, behavior-preserving case: a
-`mkdir --parents` (not a plain `mkdir`), unwrapped, whose `chmod` uses a
-numeric octal mode, with nothing but a plain separator (newline, `;`, or
-`&&`) between the two and a single directory operand textually the same
-on both sides. It is left for a human -- flagged, not rewritten -- when:
+`pre-push-fix` rewrites only the mechanical, behavior-preserving case,
+where the whole pair reconstructs losslessly to `install -d -m MODE --
+DIR`: a `mkdir --parents DIR` whose ONLY option is `--parents`, a `chmod
+MODE DIR` with a numeric octal mode and no flags, both unwrapped, with
+nothing but a plain separator (newline, `;`, or `&&`) between them and a
+single directory operand textually the same on both sides. It is left
+for a human -- flagged, not rewritten -- when:
 
 - the `mkdir` has no `--parents`. A plain `mkdir DIR` FAILS if `DIR`
   already exists (the lock-directory idiom relies on that); `install -d`
   reuses it, so the rewrite is not behavior-preserving. Only `--parents`,
   already idempotent, maps cleanly to `install -d`.
+- the `mkdir` carries any other option, or the `chmod` carries any flag.
+  The fix reconstructs `install -d -m`, so an option it does not
+  reproduce would be silently dropped -- notably `-Z` / `--context=`
+  (the SELinux/SMACK security context of the created directory).
 - the mode is symbolic (`u+rwx`: `chmod` applies it relative to the
   existing bits, `install -m` sets absolute bits, so the two differ).
 - either command is wrapped (`sudo mkdir ...; sudo chmod ...`), carries a
   redirection, or is backgrounded (`&`) or negated (`!`) -- shfmt attaches
   those to the statement and the collapse would drop or mis-scope them.
-- a comment sits between the two, or the `mkdir` already carries a mode.
+- a comment sits between the two.
 
 Waiver: `## style-ok: allow-mkdir-then-chmod` anywhere in the script.
 Reserve it for a case where the split is deliberate (a mode that must be
