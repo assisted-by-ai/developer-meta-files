@@ -59,7 +59,7 @@ main() {
    ${SUDO_TO_ROOT} cp -- "${source_code_folder_dist}/packages/kicksecure/anon-apt-sources-list/etc/apt/sources.list.d/debian.sources" "${CHROOT_FOLDER}/etc/apt/sources.list.d/debian.sources"
    ${SUDO_TO_ROOT} chmod o+r -- "${CHROOT_FOLDER}/etc/apt/sources.list.d/debian.sources"
 
-   "${dist_source_help_steps_folder}/create-local-temp-apt-repo" "$@"
+   "${dist_source_help_steps_folder}/create-local-apt-repo" "$@"
 
    ## Reading local repository containing Whonix's packages.
    chroot_run apt-get "${DIST_APTGETOPT[@]}" ${apt_sourcelist_empty} ${apt_sourceparts} -o APT::Get::List-Cleanup="0" update
@@ -110,7 +110,7 @@ main() {
 
    #chroot_run apt-get "${DIST_APTGETOPT[@]}" $apt_sourcelist_empty $apt_sourceparts -f install
 
-   "${dist_source_help_steps_folder}/remove-local-temp-apt-repo" "$@"
+   "${dist_source_help_steps_folder}/remove-local-apt-repo" "$@"
 
    ## Forget about local repository containing Whonix's packages.
    chroot_run apt-get --no-download --list-cleanup update
