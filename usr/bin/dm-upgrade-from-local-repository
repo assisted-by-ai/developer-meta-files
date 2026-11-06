@@ -27,7 +27,7 @@ dist_source_root="$( cd -- "${MYDIR}/../../../../.." && pwd )"
 if [ ! -f "${dist_source_root}/help-steps/pre" ]; then
    for dist_source_root_candidate in \
       "${DERIVATIVE_MAKER_ROOT:-}" \
-      "${derivative_maker:-}" \
+      "${source_code_folder_dist:-}" \
       "${HOME:-}/derivative-maker" ; do
       if [ -n "${dist_source_root_candidate}" ] \
          && [ -f "${dist_source_root_candidate}/help-steps/pre" ]; then
