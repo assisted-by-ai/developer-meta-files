@@ -386,6 +386,16 @@ missing section, because `build-command` is required there.
 - `timeout-minutes`: **hardcoded in reusable** at the current
   default (30).
 
+The `c-cpp` wrapper alone references the reusable at `@ai`; the
+other three track `@master`. The `security-and-quality` suite on
+`ai` drops three C/C++ style queries by query-filter
+(`cpp/poorly-documented-function`, `cpp/long-switch`,
+`cpp/commented-out-code`) - maintainability lint we do not churn C
+for - while every security query still runs. `master` deliberately
+does not carry that filter. Same first-party-branch supply-chain
+posture as `@master`: see G-A-004 / the `sha_pinning_required` note
+in agents/github-actions.md.
+
 ### Coverity canonical-repos gate placement
 
 The current `reusable-coverity.yml` uses

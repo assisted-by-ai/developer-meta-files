@@ -110,6 +110,18 @@ single-source-of-truth update propagation. Both are valid; pick
 per workflow based on how often the reusable changes vs. how
 strict the trust boundary is.
 
+One sanctioned deviation tracks a non-base first-party branch:
+`consumer-codeql-cpp.yml` references `reusable-codeql.yml@ai`, not
+`@master`. The `security-and-quality` suite on `ai` drops three
+C/C++ style queries by query-filter
+(`cpp/poorly-documented-function`, `cpp/long-switch`,
+`cpp/commented-out-code`) - maintainability lint we do not churn C
+for - while every security query still runs; `master` deliberately
+does not carry that filter. Supply-chain posture is identical to
+the `@master` case - a first-party internal ref under
+threat-model-A (see "`sha_pinning_required` intentionally OFF"
+below) - so it stays unpinned.
+
 **G-A-006: Concurrency policy - cancellable by default, singleton
 for quota-limited / release-pipeline.** Every top-level workflow
 declares a top-level `concurrency:` block (reusables follow
@@ -250,9 +262,12 @@ run. We leave it `false` deliberately:
 
 - First-party reusable workflows (`org-ai-assisted/...` /
   `Kicksecure/...` / `Whonix/...`) reference each other by
-  branch name (`@master`) on purpose - single-source-of-truth
-  update propagation, see G-A-004 above. Flipping
-  `sha_pinning_required: true` would reject every such call.
+  branch name (`@master`, or a non-base first-party branch such
+  as `@ai` - see G-A-004 above) on purpose - single-source-of-truth
+  update propagation. Both are the same trust boundary: resolving
+  any mutable ref on an internal repo is trusted transport under
+  threat-model-A. Flipping `sha_pinning_required: true` would
+  reject every such call.
 - Threat-model-A in `agents/security.md` explicitly trusts
   `github.com` and the org's own repos as transport. SHA-pin
   ceremony for internal refs is over-engineering for threats
