@@ -14,15 +14,15 @@
 ## cppcheck.paths. Optional: cppcheck.prepare-command.
 ##
 ## Reusable docs:
-## https://github.com/org-ai-assisted/developer-meta-files/blob/master/.github/workflows/reusable-cppcheck.yml
+## https://github.com/org-ai-assisted/developer-meta-files/blob/ai/.github/workflows/reusable-cppcheck.yml
 
 name: cppcheck
 
 on:
   pull_request:
-    branches: [master]
+    branches: [master, ai]
   push:
-    branches: [master]
+    branches: [master, ai]
   workflow_dispatch:
 
 permissions:
@@ -38,6 +38,6 @@ concurrency:
 
 jobs:
   cppcheck:
-    uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-cppcheck.yml@master
+    uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-cppcheck.yml@ai
     permissions:
       contents: read

@@ -20,15 +20,15 @@
 ## tab.
 ##
 ## Reusable docs:
-## https://github.com/org-ai-assisted/developer-meta-files/blob/master/.github/workflows/reusable-codeql.yml
+## https://github.com/org-ai-assisted/developer-meta-files/blob/ai/.github/workflows/reusable-codeql.yml
 
 name: CodeQL Actions
 
 on:
   push:
-    branches: [master]
+    branches: [master, ai]
   pull_request:
-    branches: [master]
+    branches: [master, ai]
   workflow_dispatch:
 
 permissions:
@@ -44,7 +44,7 @@ concurrency:
 
 jobs:
   actions:
-    uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-codeql.yml@master
+    uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-codeql.yml@ai
     with:
       language: actions
     permissions:

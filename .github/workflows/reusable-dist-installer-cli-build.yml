@@ -18,7 +18,7 @@
 ## Consumer usage (.github/workflows/builds.yml):
 ##   jobs:
 ##     build:
-##       uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-dist-installer-cli-build.yml@master
+##       uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-dist-installer-cli-build.yml@ai
 ##       with:
 ##         standalone-path: usr/share/usability-misc/dist-installer-cli-standalone
 

@@ -83,7 +83,7 @@
 ##
 ##   jobs:
 ##     actions:
-##       uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-codeql.yml@master
+##       uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-codeql.yml@ai
 ##       with:
 ##         language: actions
 ##       permissions:
@@ -95,7 +95,7 @@
 ##
 ##   jobs:
 ##     python:
-##       uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-codeql.yml@master
+##       uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-codeql.yml@ai
 ##       with:
 ##         language: python
 ##         dm-consumer-section: codeql-python
@@ -108,7 +108,7 @@
 ##
 ##   jobs:
 ##     c-cpp:
-##       uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-codeql.yml@master
+##       uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-codeql.yml@ai
 ##       with:
 ##         language: c-cpp
 ##         build-mode: manual

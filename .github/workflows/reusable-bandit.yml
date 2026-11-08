@@ -60,7 +60,7 @@
 ##     contents: read
 ##   jobs:
 ##     bandit:
-##       uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-bandit.yml@master
+##       uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-bandit.yml@ai
 ##       permissions:
 ##         contents: read
 ##

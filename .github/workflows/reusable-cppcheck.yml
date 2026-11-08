@@ -49,7 +49,7 @@
 ##     contents: read
 ##   jobs:
 ##     cppcheck:
-##       uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-cppcheck.yml@master
+##       uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-cppcheck.yml@ai
 ##       permissions:
 ##         contents: read
 ##
