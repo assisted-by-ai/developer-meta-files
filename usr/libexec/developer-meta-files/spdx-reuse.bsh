@@ -227,8 +227,7 @@ spdx_reuse_generate_toml() {
          '  "COPYING",' \
          '  "LICENSES/**",' \
          '  "debian/**",' \
-         '  "auto-generated-man-pages/**",' \
-         '  "changelog.upstream",'
+         '  "auto-generated-man-pages/**",'
       for p in "${extra[@]}"; do
          [ -n "${p}" ] || continue
          ## Escape for a TOML basic string so an odd path char cannot break it.
@@ -270,14 +269,13 @@ spdx_reuse_convert_tree() {
       [ -L "${dir}/${file}" ] && continue
       ## Skip non-source files that merely QUOTE a marker, so the whole-file
       ## str_replace does not rewrite text that is not a license header:
-      ##  - COPYING / changelog.upstream: verbatim + generated (pass 2 and the
-      ##    REUSE.toml pass skip the same pair; a changelog quotes header lines in
-      ##    its commit messages).
+      ##  - COPYING: verbatim license text (pass 2 and the REUSE.toml pass skip it
+      ##    too).
       ##  - this converter's OWN source: it carries the marker/email literals as
       ##    code (the has-header grep, the str_replace arguments).
       ## All already carry / get their license info elsewhere, so nothing is lost.
       case "${file}" in
-         COPYING | changelog.upstream | \
+         COPYING | \
          usr/libexec/developer-meta-files/spdx-reuse.bsh)
             continue
             ;;
@@ -296,7 +294,7 @@ spdx_reuse_convert_tree() {
    for file in "${files[@]}"; do
       [ -L "${dir}/${file}" ] && continue
       case "${file}" in
-         COPYING | changelog.upstream | REUSE.toml | \
+         COPYING | REUSE.toml | \
          usr/libexec/developer-meta-files/spdx-reuse.bsh)
             continue
             ;;
@@ -323,7 +321,7 @@ spdx_reuse_convert_tree() {
    ## 'reuse lint' keeps flagging them.
    for file in "${files[@]}"; do
       case "${file}" in
-         COPYING | changelog.upstream | REUSE.toml)
+         COPYING | REUSE.toml)
             continue
             ;;
          LICENSES/* | debian/* | auto-generated-man-pages/*)
