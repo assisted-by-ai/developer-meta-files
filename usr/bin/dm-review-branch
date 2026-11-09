@@ -50,7 +50,8 @@ for review_opt in "${review_opts[@]}"; do
    ## three different tools (git-diff-review / git-meld / git-kdiff3) accept different legitimate
    ## view options, so an allowlist would over-block ordinary usage.
    case "${review_opt%%=*}" in
-      -s | --no-patch | --quiet | --name-only | --name-status | -o | --output \
+      -s | --no-patch | --quiet | --name-only | --name-status \
+         | --stat | --numstat | --shortstat | --check | -o | --output \
          | --no-ext-diff | --diff-filter)
          die 2 "option '${review_opt}' suppresses or redirects the diff and would silently empty the review."
          ;;
