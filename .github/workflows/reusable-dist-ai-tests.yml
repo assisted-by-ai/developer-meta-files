@@ -273,11 +273,14 @@ jobs:
         ## anchor here (the maintainer re-verifies SLSA when bumping a pin). Needs
         ## 'helper-scripts: true' (the installer sources it), opted in alongside.
         run: |
-          # static-cli-install's `has stecho` / `has sanitize-string` need the
-          # helper-scripts usr/bin tools on PATH; the hs-runtime step above only
-          # symlinks the libexec SOURCING tree, so add the checkout's bin here
-          # (helper-scripts: true is a co-requisite of static-analysis-tools).
+          # static-cli-install's `has stecho` / `sanitize-string` need the
+          # helper-scripts usr/bin tools on PATH, and sanitize-string is a python
+          # script that imports its sanitize_string module -- so also put the
+          # checkout's dist-packages on PYTHONPATH. The hs-runtime step above only
+          # symlinks the libexec SOURCING tree (helper-scripts: true is a
+          # co-requisite of static-analysis-tools).
           export PATH="${GITHUB_WORKSPACE}/helper-scripts/usr/bin:${PATH}"
+          export PYTHONPATH="${GITHUB_WORKSPACE}/helper-scripts/usr/lib/python3/dist-packages${PYTHONPATH:+:${PYTHONPATH}}"
           component/usr/bin/static-cli-install --tool zizmor --no-attest --no-vt --install-dir /usr/local/bin
           component/usr/bin/static-cli-install --tool actionlint --no-attest --no-vt --install-dir /usr/local/bin
 
