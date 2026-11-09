@@ -82,23 +82,52 @@ would be refused -- document that caveat in the unit.
   nothing; for an arbitrary-action escalator, leave it at Layer 1 + the scratch
   dirs + a documented residual (ProtectSystem would break its actions).
 
-## Optional future tightening (NOT part of W^X; operator's call)
+## NoNewPrivileges=yes on non-escalators (applied)
 
-A non-escalator hardened daemon MAY also set `NoNewPrivileges=yes` explicitly for
-defense-in-depth, and W^X does not need it. VERIFIED on systemd 257, both root
-AND `User=` units, with and without the `~memfd_create` filter: the live process
-runs `NoNewPrivs=0` (`/proc/<pid>/status`). systemd installs the unit seccomp in
-the executor WHILE IT IS STILL ROOT (`CAP_SYS_ADMIN`), BEFORE the `User=` uid
-drop, so `no_new_privs` is never required and these directives do NOT imply it on
-257 -- contrary to the common reading of `context_has_no_new_privileges()` (which
-reviewers repeatedly flag; it does not match the 257.13 executor sequence, and a
-real `User=sdwdate` installed unit confirms `NoNewPrivs=0`). MDWE itself is
-`PR_SET_MDWE` (prctl), not seccomp. Do NOT add `NoNewPrivileges=yes` to a daemon
-that legitimately gains privilege: a Variant-1 escalator, or a daemon that execs
-across an AppArmor `Px` transition -- e.g. kloak, whose unit sets
-`NoNewPrivileges=false` and whose profile has `/usr/bin/kloakwl rPx -> ...` (so
-`NoNewPrivileges=yes` would break the kloakwl launch; the unit says so). Separate
-hardening axis, out of this pattern's scope.
+A non-escalator hardened daemon ALSO sets `NoNewPrivileges=yes` for
+defense-in-depth. SEPARATE axis from W^X -- W^X does not need it -- and whether
+it changes anything depends on the unit regime (verified on systemd 257.13, live
+`/proc/<pid>/status`):
+
+- SYSTEM units (plain root, and `User=` system units): the root executor installs
+  the unit seccomp WHILE STILL ROOT (`CAP_SYS_ADMIN`), BEFORE the `User=` uid
+  drop, so `no_new_privs` is never required and the W^X directives do NOT imply it
+  -- a W^X-only system unit runs `NoNewPrivs=0` (contrary to the common reading of
+  `context_has_no_new_privileges()`, which reviewers repeatedly flag; it does not
+  match the 257.13 executor sequence, and a real `User=sdwdate` installed unit
+  confirms `NoNewPrivs=0`). Here `NoNewPrivileges=yes` is a REAL tightening:
+  verified `NoNewPrivs` 0 -> 1 with the directive, 0 without.
+- USER-SESSION (`systemd --user`) units: NO root executor, so systemd MUST set
+  `no_new_privs=1` to install any unprivileged seccomp. Each of `SystemCallFilter`,
+  `SystemCallArchitectures`, and `MemoryDenyWriteExecute` (prctl) ALONE forces
+  `NoNewPrivs=1` on a user unit (only `NoExecPaths` alone leaves it 0). So a
+  W^X-hardened user unit ALREADY runs `NoNewPrivs=1`; the explicit
+  `NoNewPrivileges=yes` only documents and pins that guarantee (no behavior
+  change). MDWE itself is `PR_SET_MDWE` (prctl), not seccomp.
+
+Under `NoNewPrivs=1` a setuid exec cannot gain privilege (`sudo` aborts: "the
+'no new privileges' flag is set"; `pkexec` likewise). `NoNewPrivileges=yes` is
+therefore added to every AUDITED non-escalator -- privileged work via `leaprun`
+(a non-setuid privleapd socket client) or `systemctl` (D-Bus to PID1) is not an
+in-process gain -- and the socket-proxyd units get it from their generator
+template (`anon-ws-disable-stacked-tor/.../systemd-unit-files-generator`), not by
+hand-editing the ~20 autogen files.
+
+EXCLUDED (no `NoNewPrivileges=yes`; each gains privilege):
+- `privleapd` -- escalates admin-defined root actions (`shim.py` -> Popen). A
+  SYSTEM escalator: W^X via the root executor keeps `NoNewPrivs=0`, so escalation
+  still works; the unit sets `NoNewPrivileges=false` explicitly.
+- `kloak` -- execs across an AppArmor non-subset `Px` (`/usr/bin/kloakwl rPx ->
+  ...`); `NoNewPrivileges=yes` would break that launch. SYSTEM unit, explicit
+  `NoNewPrivileges=false`.
+- `systemcheck` -- a `systemd --user` escalator: its main flow execs setuid
+  `sudo` / `pkexec` (`check_privilege_escalation_tool.bsh:72,78`). CAVEAT: being a
+  USER unit, its W^X seccomp ALREADY forces `NoNewPrivs=1`, so those checks are
+  ALREADY refused in the autostart-service context -- omitting `NoNewPrivileges=
+  yes` does NOT restore them. A `systemd --user` escalator is thus inherently
+  incompatible with W^X seccomp; reconciling systemcheck's W^X unit against its
+  escalation checks is a separate open item, tracked on org-ai-assisted/
+  systemcheck PR #18 (awaiting an operator decision).
 
 ## Verify empirically (do not theorize)
 
