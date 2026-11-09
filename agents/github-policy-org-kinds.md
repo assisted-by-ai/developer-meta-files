@@ -23,13 +23,14 @@ It is a published mirror of content maintained elsewhere (the wiki, via
 git-mediawiki - there is no upstream GitHub repo to file against), runs
 no CI (the Pages legacy branch build needs no Actions), and is pushed by
 the bot. So its profile is MIRROR's repo body (issues/wiki/projects/
-discussions off, secret-scan on), MIRROR's Dependabot stance (all three
-switches OFF - no CI to act on a bump), MIRROR's ruleset (deletion +
+discussions off, secret-scan on), all three Dependabot switches OFF
+(like SOURCE - no CI to act on a bump), MIRROR's ruleset (deletion +
 non_fast_forward, NO required_signatures - the bot's deploy pushes carry
 no matching GPG key), PVR off (same as everyone), and SOURCE's org-wide
-Actions-disabled (`enabled_repositories=none`). The one axis where it
-differs from MIRROR is Actions: STAGE disables them entirely, MIRROR
-keeps them on behind the allow-list.
+Actions-disabled (`enabled_repositories=none`). It differs from MIRROR
+on two axes, both because it runs no CI: Dependabot (all OFF here, vs
+MIRROR's alerts + security ON and version opt-in) and Actions (STAGE
+disables them entirely, MIRROR keeps them on behind the allow-list).
 
 ## Registration drift is a finding
 
