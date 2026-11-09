@@ -40,6 +40,14 @@ already-written file mapped `PROT_READ|PROT_EXEC` has no PROT_WRITE bit):
     ProtectSystem=strict
     ProtectHome=yes
 
+For a ROOT daemon also list `/dev` (devtmpfs is rw and NOT noexec, so uid 0 can
+drop a file there and execve it) and the daemon's own state dir (e.g.
+`/var/lib/<daemon>`); `ProtectSystem=full/strict` does not cover `/dev`, `/var`,
+`/opt`, `/srv`. GOTCHA: a `+`-prefixed `ExecStartPre=` or `PermissionsStartOnly=true`
+makes that control process run as root EXEMPT from the unit sandbox (no MDWE /
+SystemCallFilter / NoExecPaths) -- so W^X covers `ExecStart=` only; do not claim
+the ExecStartPre helper is covered.
+
     ## daemon WITH an AppArmor profile: deny executable mapping (`m`) on every
     ## WRITABLE path -- grant `m` only on read-only trusted paths (its binary +
     ## system libs). e.g. sdwdate: `/tmp/* rw,` not `/tmp/* mrw,`.
