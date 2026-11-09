@@ -665,21 +665,22 @@ signatures_create() {
       if [ -n "${dm_target_item}" ]; then
          "${dist_developer_meta_files_folder}/usr/bin/dm-reproducible-buildinfo" --target "${dm_target_item}" --image "${file_item}"
          sign_and_verify_all "${file_item}.dm-buildinfo"
-      fi
 
-      ## Image-level SBOM sidecar. The chroot-post.d hook embedded an as-built
-      ## CycloneDX SBOM in the image and build-steps.d/*_run-chroot-scripts-post-d
-      ## copied it out to ${dist_binary_build_folder}/system.cdx.json. Publish it
-      ## as a signed sidecar next to each image artifact; the content is identical
-      ## across formats of one build.
-      if [ -f "${dist_binary_build_folder}/system.cdx.json" ]; then
-         cp -- "${dist_binary_build_folder}/system.cdx.json" "${file_item}.cdx.json"
-         sign_and_verify_all "${file_item}.cdx.json"
+         ## Image-level SBOM sidecar. 4300 copied this build's embedded CycloneDX
+         ## SBOM out to ${binary_image_raw_file}.cdx.json (named per flavor/target
+         ## so builds sharing the folder do not clobber it). All image formats of
+         ## one build share the rootfs, so one SBOM. Only image artifacts (a
+         ## non-empty target) receive it, matching .dm-buildinfo.
+         if [ -f "${binary_image_raw_file}.cdx.json" ]; then
+            safe-rm --force -- "${file_item}.cdx.json"
+            cp -- "${binary_image_raw_file}.cdx.json" "${file_item}.cdx.json"
+            sign_and_verify_all "${file_item}.cdx.json"
+         fi
       fi
    done
 
-   ## The staging copy has been distributed as per-artifact signed sidecars.
-   safe-rm --force -- "${dist_binary_build_folder}/system.cdx.json"
+   ## Remove the per-build SBOM staging copy; the signed per-artifact sidecars remain.
+   safe-rm --force -- "${binary_image_raw_file}.cdx.json"
 }
 
 legal_files_copy() {
