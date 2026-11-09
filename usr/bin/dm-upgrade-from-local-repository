@@ -34,10 +34,17 @@ for dist_source_root_candidate in \
    "${DERIVATIVE_MAKER_ROOT:-}" \
    "${source_code_folder_dist:-}" \
    "${HOME:-}/derivative-maker" ; do
-   if [ -n "${dist_source_root_candidate}" ] \
-      && [ "${dist_source_root_candidate}" != "/" ] \
-      && [ "${dist_source_root_candidate}" != "//" ] \
-      && [ -f "${dist_source_root_candidate}/help-steps/pre" ]; then
+   [ -n "${dist_source_root_candidate}" ] || continue
+   ## Reject the filesystem root in ANY spelling ('/', '//', '///', '/.', '/usr/..',
+   ## '/proc/self/root', a symlink that resolves to '/'): readlink -m canonicalizes
+   ## the path (collapsing '.', '..' and extra slashes and resolving symlinks, with
+   ## no existence requirement), so a candidate that resolves to root is never taken
+   ## as a checkout and '/help-steps/pre' is never sourced. The ACCEPTED value stays
+   ## the original (logical) path, so a symlinked checkout is unaffected.
+   if [ "$( readlink -m -- "${dist_source_root_candidate}" )" = "/" ]; then
+      continue
+   fi
+   if [ -f "${dist_source_root_candidate}/help-steps/pre" ]; then
       dist_source_root="${dist_source_root_candidate}"
       break
    fi
