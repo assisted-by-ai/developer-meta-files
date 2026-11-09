@@ -1577,7 +1577,10 @@ the same on both sides. It is left for a human -- flagged, not rewritten
   modes only the final component and makes any parent it creates 0755
   regardless of `-m`/umask, so a private path's parents would be exposed.
   Keep `mkdir --parents` + `chmod` (whose parents follow the umask), or
-  set the parents' perms deliberately.
+  set the parents' perms deliberately. The fixer judges this by a LITERAL
+  `/` in the source, so an opaque `"${dir}"` is treated as a single
+  component and still auto-rewritten -- if it may expand to a private
+  multi-component path, prefer the explicit forms above.
 - the `mkdir` carries any other option, or the `chmod` carries any flag.
   The fix reconstructs `install -d -m`, so an option it does not
   reproduce would be silently dropped -- notably `-Z` / `--context=`
