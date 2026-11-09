@@ -2239,6 +2239,33 @@ pkg_git_debinstfile() {
    return 0
 }
 
+## Generate a declared-floor CycloneDX SBOM per binary package (see
+## 'genmkfile sbom') and ship it inside the .deb. Also refreshes the install
+## mapping via 'genmkfile debinstfile' so the SBOM is routed into the correct
+## binary package, and commits the SBOM plus its routing together so the two
+## never drift apart. The SBOM rides the apt repository signature once shipped;
+## no separate signing. Scoped to usr/share/sbom and debian/*.install.
+pkg_git_sbom() {
+   local msg
+
+   repo_skip 'derivative-maker' || return 0
+
+   ## Non-package repos (no debian/control) have nothing to describe.
+   if [ ! -f 'debian/control' ]; then
+      return 0
+   fi
+
+   dry_run_or_run genmkfile sbom
+   dry_run_or_run genmkfile debinstfile
+
+   msg='generate SBOM (generated using "genmkfile sbom")'
+   dry_run_or_run git add -- 'usr/share/sbom' || true
+   dry_run_or_run git add -- 'debian/*.install' || true
+   git_commit_pathspecs "${msg}" 'usr/share/sbom' 'debian/*.install'
+   dry_run_or_run git status
+   return 0
+}
+
 pkg_git_commit_packaging() {
    local msg
 
