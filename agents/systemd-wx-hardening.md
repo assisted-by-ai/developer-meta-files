@@ -43,7 +43,9 @@ already-written file mapped `PROT_READ|PROT_EXEC` has no PROT_WRITE bit):
 For a ROOT daemon also list `/dev` (devtmpfs is rw and NOT noexec, so uid 0 can
 drop a file there and execve it) and the daemon's own state dir (e.g.
 `/var/lib/<daemon>`); `ProtectSystem=full/strict` does not cover `/dev`, `/var`,
-`/opt`, `/srv`. GOTCHA: a `+`-prefixed `ExecStartPre=` or `PermissionsStartOnly=true`
+`/opt`, `/srv`. Device NODES stay usable under `NoExecPaths=/dev` (only executing
+FROM /dev is blocked). A DROPPED-PRIVILEGE daemon does NOT need `/dev` -- a
+non-root uid cannot create files in root-owned `/dev`. GOTCHA: a `+`-prefixed `ExecStartPre=` or `PermissionsStartOnly=true`
 makes that control process run as root EXEMPT from the unit sandbox (no MDWE /
 SystemCallFilter / NoExecPaths) -- so W^X covers `ExecStart=` only; do not claim
 the ExecStartPre helper is covered.
