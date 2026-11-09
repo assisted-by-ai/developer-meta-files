@@ -82,6 +82,17 @@ would be refused -- document that caveat in the unit.
   nothing; for an arbitrary-action escalator, leave it at Layer 1 + the scratch
   dirs + a documented residual (ProtectSystem would break its actions).
 
+## Optional future tightening (NOT part of W^X; operator's call)
+
+A non-escalator hardened daemon MAY also set `NoNewPrivileges=yes` explicitly for
+defense-in-depth. systemd does NOT imply it from these directives (verified: a
+root OR `User=` unit with MDWE alone runs `NoNewPrivs=0`), and W^X does not need
+it -- MDWE (`PR_SET_MDWE` prctl) and the `~memfd_create` seccomp install via the
+root executor's `CAP_SYS_ADMIN` regardless of `no_new_privs`. Do NOT add it to a
+daemon that legitimately gains privilege: a Variant-1 escalator, or an AppArmor
+`Px` transition (kloak), which set `NoNewPrivileges=false` deliberately. Separate
+hardening axis, out of this pattern's scope.
+
 ## Verify empirically (do not theorize)
 
 Per daemon: it still reaches active/running and performs its real function with
