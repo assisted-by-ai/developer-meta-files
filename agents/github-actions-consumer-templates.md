@@ -644,7 +644,7 @@ never in `.github/workflows/`:
 
     jobs:
       coverity:
-        uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-coverity.yml@master
+        uses: org-ai-assisted/developer-meta-files/.github/workflows/reusable-coverity.yml@ai
         secrets:
           COVERITY_SCAN_TOKEN: ${{ secrets.COVERITY_SCAN_TOKEN }}
           COVERITY_SCAN_EMAIL: ${{ secrets.COVERITY_SCAN_EMAIL }}
