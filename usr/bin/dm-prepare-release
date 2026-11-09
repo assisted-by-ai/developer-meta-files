@@ -543,6 +543,23 @@ Please donate! [C]
 }
 
 
+## Publish the image's embedded CycloneDX SBOM as a signed sidecar next to one
+## image artifact. 4300 copied the SBOM out to ${binary_image_raw_file}.cdx.json
+## (named per flavor/target so builds sharing the output folder do not clobber
+## it); all image formats of one build share the rootfs, so one SBOM. Gated on a
+## non-empty target so only image artifacts (ova/raw/qcow2/iso) get it, matching
+## .dm-buildinfo -- source/installer artifacts do not.
+image_sbom_sidecar_sign() {
+   local file_item target
+   file_item="$1"
+   target="$2"
+   [ -n "${target}" ] || return 0
+   [ -f "${binary_image_raw_file}.cdx.json" ] || return 0
+   safe-rm --force -- "${file_item}.cdx.json"
+   cp -- "${binary_image_raw_file}.cdx.json" "${file_item}.cdx.json"
+   sign_and_verify_all "${file_item}.cdx.json"
+}
+
 signatures_create() {
    local var_names file_list upload_url_part target_names should_signify_list
    var_names=()
@@ -665,18 +682,9 @@ signatures_create() {
       if [ -n "${dm_target_item}" ]; then
          "${dist_developer_meta_files_folder}/usr/bin/dm-reproducible-buildinfo" --target "${dm_target_item}" --image "${file_item}"
          sign_and_verify_all "${file_item}.dm-buildinfo"
-
-         ## Image-level SBOM sidecar. 4300 copied this build's embedded CycloneDX
-         ## SBOM out to ${binary_image_raw_file}.cdx.json (named per flavor/target
-         ## so builds sharing the folder do not clobber it). All image formats of
-         ## one build share the rootfs, so one SBOM. Only image artifacts (a
-         ## non-empty target) receive it, matching .dm-buildinfo.
-         if [ -f "${binary_image_raw_file}.cdx.json" ]; then
-            safe-rm --force -- "${file_item}.cdx.json"
-            cp -- "${binary_image_raw_file}.cdx.json" "${file_item}.cdx.json"
-            sign_and_verify_all "${file_item}.cdx.json"
-         fi
       fi
+
+      image_sbom_sidecar_sign "${file_item}" "${dm_target_item}"
    done
 
    ## Remove the per-build SBOM staging copy; the signed per-artifact sidecars remain.
