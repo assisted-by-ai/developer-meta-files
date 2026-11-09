@@ -125,9 +125,13 @@ EXCLUDED (no `NoNewPrivileges=yes`; each gains privilege):
   USER unit, its W^X seccomp ALREADY forces `NoNewPrivs=1`, so those checks are
   ALREADY refused in the autostart-service context -- omitting `NoNewPrivileges=
   yes` does NOT restore them. A `systemd --user` escalator is thus inherently
-  incompatible with W^X seccomp; reconciling systemcheck's W^X unit against its
-  escalation checks is a separate open item, tracked on org-ai-assisted/
-  systemcheck PR #18 (awaiting an operator decision).
+  incompatible with W^X seccomp. RESOLVED (PR #18): the escalation self-check is
+  now `no_new_privs`-aware -- under `NoNewPrivs=1` it reports the setuid
+  `sudo`/`pkexec` checks as `N/A (no_new_privs)` instead of false-failing, so the
+  W^X hardening stays on the unit; the leaprun checks (non-setuid socket client)
+  are unaffected and still run, and an interactive `systemcheck` run
+  (`NoNewPrivs=0`) still exercises sudo/pkexec normally. The unit itself stays
+  excluded from an explicit `NoNewPrivileges=yes` (it is an escalator).
 
 ## Verify empirically (do not theorize)
 
