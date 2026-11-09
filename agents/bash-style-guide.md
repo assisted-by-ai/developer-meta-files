@@ -1539,26 +1539,45 @@ Bad -- the create and the mode are split:
     mkdir --parents -- "${dir}"
     chmod 0755 -- "${dir}"
 
-Use `install -d -m` instead of `mkdir --parents --mode=` for this. It
-sets the mode on EVERY component it creates AND re-modes an existing
-target (fixing messed-up perms on a directory that already exists),
-whereas `mkdir --parents --mode=` modes only the deepest component --
-the SC2174 case. Being `install`, not `mkdir`, it never trips SC2174, so
-no `# shellcheck disable=SC2174` is needed. `install -d` is idempotent
-(like `mkdir --parents`): it succeeds when the directory already exists.
+Use `install -d -m` instead of `mkdir --parents --mode=` for this. For a
+SINGLE-component target it sets the mode on the directory AND re-modes an
+existing one (fixing messed-up perms on a directory that already exists),
+whereas `mkdir --parents --mode=` modes only the deepest component -- the
+SC2174 case. Being `install`, not `mkdir`, it never trips SC2174, so no
+`# shellcheck disable=SC2174` is needed. `install -d` is idempotent (like
+`mkdir --parents`): it succeeds when the directory already exists.
+
+Caveat -- a MULTI-component target (`a/b/c`): `install -d -m MODE` applies
+MODE only to the final component; any PARENT it has to create (`a`, `b`)
+is made 0755, independent of `-m` AND the umask. So `install -d -m 0700
+-- a/b/c` leaves `a` and `b` world-traversable (0755) -- unlike `mkdir
+--parents -- a/b/c; chmod 0700 -- a/b/c`, where the parents keep the
+umask-default mode (0700 under `umask 077`). `mkdir --parents --mode=0700`
+is no better: `--mode` with `--parents` also modes only the deepest
+component (the SC2174 case). So the fixer auto-rewrites only a
+single-component target; a multi-component pair is left for a human
+(below), who must set the parents' perms deliberately.
 
 `pre-push-fix` rewrites only the mechanical, behavior-preserving case,
 where the whole pair reconstructs losslessly to `install -d -m MODE --
 DIR`: a `mkdir --parents DIR` whose ONLY option is `--parents`, a `chmod
 MODE DIR` with a numeric octal mode and no flags, both unwrapped, with
-nothing but a plain separator (newline, `;`, or `&&`) between them and a
-single directory operand textually the same on both sides. It is left
-for a human -- flagged, not rewritten -- when:
+nothing but a plain separator (newline, `;`, or `&&`) between them and
+one directory operand -- a single path component (no `/`) -- textually
+the same on both sides. It is left for a human -- flagged, not rewritten
+-- when:
 
 - the `mkdir` has no `--parents`. A plain `mkdir DIR` FAILS if `DIR`
   already exists (the lock-directory idiom relies on that); `install -d`
   reuses it, so the rewrite is not behavior-preserving. Only `--parents`,
-  already idempotent, maps cleanly to `install -d`.
+  already idempotent, maps cleanly to `install -d`. The atomic form here
+  is `mkdir --mode=MODE -- DIR` (one command, same fail-on-exists
+  semantics), NOT `install -d`.
+- the target is a multi-component path (contains `/`). `install -d -m`
+  modes only the final component and makes any parent it creates 0755
+  regardless of `-m`/umask, so a private path's parents would be exposed.
+  Keep `mkdir --parents` + `chmod` (whose parents follow the umask), or
+  set the parents' perms deliberately.
 - the `mkdir` carries any other option, or the `chmod` carries any flag.
   The fix reconstructs `install -d -m`, so an option it does not
   reproduce would be silently dropped -- notably `-Z` / `--context=`
