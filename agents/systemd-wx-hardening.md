@@ -85,12 +85,19 @@ would be refused -- document that caveat in the unit.
 ## Optional future tightening (NOT part of W^X; operator's call)
 
 A non-escalator hardened daemon MAY also set `NoNewPrivileges=yes` explicitly for
-defense-in-depth. systemd does NOT imply it from these directives (verified: a
-root OR `User=` unit with MDWE alone runs `NoNewPrivs=0`), and W^X does not need
-it -- MDWE (`PR_SET_MDWE` prctl) and the `~memfd_create` seccomp install via the
-root executor's `CAP_SYS_ADMIN` regardless of `no_new_privs`. Do NOT add it to a
-daemon that legitimately gains privilege: a Variant-1 escalator, or an AppArmor
-`Px` transition (kloak), which set `NoNewPrivileges=false` deliberately. Separate
+defense-in-depth, and W^X does not need it. VERIFIED on systemd 257, both root
+AND `User=` units, with and without the `~memfd_create` filter: the live process
+runs `NoNewPrivs=0` (`/proc/<pid>/status`). systemd installs the unit seccomp in
+the executor WHILE IT IS STILL ROOT (`CAP_SYS_ADMIN`), BEFORE the `User=` uid
+drop, so `no_new_privs` is never required and these directives do NOT imply it on
+257 -- contrary to the common reading of `context_has_no_new_privileges()` (which
+reviewers repeatedly flag; it does not match the 257.13 executor sequence, and a
+real `User=sdwdate` installed unit confirms `NoNewPrivs=0`). MDWE itself is
+`PR_SET_MDWE` (prctl), not seccomp. Do NOT add `NoNewPrivileges=yes` to a daemon
+that legitimately gains privilege: a Variant-1 escalator, or a daemon that execs
+across an AppArmor `Px` transition -- e.g. kloak, whose unit sets
+`NoNewPrivileges=false` and whose profile has `/usr/bin/kloakwl rPx -> ...` (so
+`NoNewPrivileges=yes` would break the kloakwl launch; the unit says so). Separate
 hardening axis, out of this pattern's scope.
 
 ## Verify empirically (do not theorize)
