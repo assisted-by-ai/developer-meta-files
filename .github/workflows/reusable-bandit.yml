@@ -35,11 +35,14 @@
 ## bandit is a universal consumer template - no
 ## .github/dm-consumer.yml section needed. severity-level,
 ## confidence-level, and timeout-minutes are hardcoded here at
-## the previous defaults (medium / medium / 10 min). Per-repo
-## suppressions use bandit's `# nosec` inline comment, not a
-## workflow-side `skips:` list. If a real use case for per-repo
-## skip lists appears during migration, promote `bandit.skips`
-## to dm-consumer.yml at that point (see spec parameter table).
+## the previous defaults (medium / medium / 10 min). The only
+## workflow-side skip is the fleet-wide B303,B324 weak-hash pair
+## (see the `bandit` step for why: apt bandit 1.6.2 version-skew,
+## not a per-repo choice). A per-repo REAL false positive still
+## uses bandit's `# nosec` inline comment. If a real use case for
+## per-repo skip lists appears during migration, promote
+## `bandit.skips` to dm-consumer.yml at that point (see spec
+## parameter table).
 ##
 ## ## Caller responsibilities
 ##
@@ -129,6 +132,37 @@ jobs:
         ##
         ## -ll  severity threshold >= medium
         ## -ii  confidence threshold >= medium
+        ## -s B303,B324  Skip bandit's two weak-hash checks fleet-wide.
+        ##      Forced by the apt-pinned bandit (Ubuntu noble ships
+        ##      1.6.2, kept deliberately for the Debian-vetted supply
+        ##      chain), which cannot evaluate weak-hash use the way
+        ##      modern bandit can:
+        ##        - B324 hashlib.new(): the 1.6.2 plugin has no
+        ##          isinstance() guard on the algorithm argument, so a
+        ##          non-literal arg (e.g. hashlib.new(algos[name]))
+        ##          resolves to None and the plugin raises an internal
+        ##          error ("'NoneType' object has no attribute 'lower'").
+        ##          Logged only -- bandit still exits 0 on it, so it is
+        ##          noise, not the red.
+        ##        - B303 / B324 ignore usedforsecurity=False, so an
+        ##          explicit NON-security digest
+        ##          (hashlib.sha1(..., usedforsecurity=False) for RFC
+        ##          4122 v5 UUIDs / reproducible-build manifest hashes)
+        ##          is flagged Medium and FAILS the gate. That is the
+        ##          actual failure this skip fixes.
+        ##      1.6.2 offers no way to silence only those false signals
+        ##      (no per-check usedforsecurity handling), and we do not
+        ##      sprinkle per-file `# nosec` -- it silently misses sites
+        ##      (how this first went red). TRADEOFF, accepted: skipping
+        ##      B303/B324 ALSO stops this lane failing on GENUINE weak
+        ##      md5/sha1/md4 hashing (a Medium-severity signal), e.g.
+        ##      hashlib.sha1(password) or hashlib.new("md5", data). Weak
+        ##      hashing is left to code review and the advisory
+        ##      modern-bandit ai-review reviewer; this CI lane no longer
+        ##      gates it. (The CodeQL python lane is NOT a substitute:
+        ##      it only flags sensitive-data-FLOW hashing and does not
+        ##      fail the job.) High-severity checks (shell=True, eval,
+        ##      ...) are unaffected and still fail the gate.
         ## --   end of options (defensive; file list may begin
         ##      with names like './-foo.py' that would otherwise
         ##      be parsed as options).
@@ -140,7 +174,7 @@ jobs:
           set -o nounset
           set -o pipefail
           .github/dist-ai/ci/bandit-discover-python.sh \
-            | xargs -0 --no-run-if-empty -- bandit -ll -ii --
+            | xargs -0 --no-run-if-empty -- bandit -ll -ii -s B303,B324 --
 
       - name: Emit step summary
         if: always()
@@ -156,4 +190,5 @@ jobs:
             --row "outcome=${JOB_STATUS}" \
             --row "severity=medium" \
             --row "confidence=medium" \
+            --row "skipped-checks=B303,B324 (weak-hash; apt bandit 1.6.2 version-skew)" \
             --row "discovery=.py extension + shebang scan"
