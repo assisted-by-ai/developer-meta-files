@@ -31,6 +31,41 @@ pre-6.3 fallback). Alone it leaves three bypasses: a written `memfd` mapped
 (`SystemCallArchitectures=native`), and `READ_IMPLIES_EXEC` on the seccomp
 fallback (`LockPersonality`).
 
+### memfd_create denial MODE: SIGSYS default vs EPERM (GUI/Wayland daemons)
+
+`SystemCallFilter=~memfd_create` with NO `SystemCallErrorNumber` denies the call
+with the systemd DEFAULT, SIGSYS, which HARD-KILLS the process. That is correct
+and intended for a LEAF daemon that never calls memfd_create itself (most of
+these units).
+
+But a daemon whose OWN code -- or an inherited child (the filter inherits across
+fork/execve) -- calls memfd_create is KILLED on that call. Qt (5 and 6) and GTK
+Wayland clients allocate their shm draw buffers via libwayland's
+`os_create_anonymous_file`, which tries memfd_create FIRST, so a GUI/Wayland
+daemon SIGSYS-DIES the instant it maps a surface (a window, or a popup/menu) --
+the service may "start" (a QSystemTrayIcon over StatusNotifier D-Bus maps no
+surface) yet die on first draw. (Measured: a Qt5 and a Qt6 client, and the real
+msgdispatcher QDialog, all die `status=31/SYS`, kernel audit `syscall=319`,
+`code=SECCOMP_RET_KILL_PROCESS`, under the default.)
+
+For such a daemon add `SystemCallErrorNumber=EPERM`:
+
+    SystemCallFilter=~memfd_create
+    SystemCallErrorNumber=EPERM
+
+memfd_create then returns `-1 EPERM` instead of killing -- the W^X bypass stays
+CLOSED IDENTICALLY (the call is still denied; nothing can create an executable
+memfd) -- and libwayland/Qt takes its `shm_open`/`mkstemp` fallback and renders.
+A SIGSYS *kill* gives the fallback no chance; an EPERM *return* does. This is the
+SAME rationale as the escalator EPERM below: the daemon's OWN code legitimately
+hits the syscall, so it must fail soft, not die. Keep `/dev/shm` in `NoExecPaths`
+so the shm_open fallback buffer lands non-exec (both vectors stay closed).
+(Measured: under EPERM the same Qt5/Qt6 clients and the real msgdispatcher render
+and exit cleanly, memfd_create still returning EPERM.) Applied to the GUI/Wayland
+user units msgcollector-gui, sdwdate-gui, livecheck. Do NOT remove `~memfd_create`
+to "fix" a GUI daemon -- that reopens the mmap(PROT_EXEC)-on-memfd bypass MDWE
+alone does not cover.
+
 Layer 2 -- file-backed executable mappings (MDWE does NOT cover these: an
 already-written file mapped `PROT_READ|PROT_EXEC` has no PROT_WRITE bit):
 
@@ -140,4 +175,7 @@ NO SIGSYS/seccomp denial in the journal (`/proc/<pid>/status` shows `Seccomp: 2`
 AND a probe proves closure -- `mprotect(+PROT_EXEC)` / `mmap(W|X)` -> EACCES,
 `memfd_create` -> EPERM/SIGSYS, and a file-backed `mmap(PROT_READ|PROT_EXEC)` in
 a NoExecPaths dir -> EACCES/EPERM. An escalator additionally: a real action
-escalates+runs under the hardened unit.
+escalates+runs under the hardened unit. A GUI/Wayland daemon additionally: prove
+it RENDERS -- actually maps a window or popup/menu SURFACE -- not merely that it
+reaches active; a tray icon maps no surface, so a daemon can "start" green yet
+SIGSYS-die on first draw (see the EPERM subsection above).
