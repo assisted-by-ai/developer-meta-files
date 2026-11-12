@@ -35,11 +35,13 @@
 ## bandit is a universal consumer template - no
 ## .github/dm-consumer.yml section needed. severity-level,
 ## confidence-level, and timeout-minutes are hardcoded here at
-## the previous defaults (medium / medium / 10 min). The only
-## workflow-side skip is the fleet-wide B303,B324 weak-hash pair
-## (see the `bandit` step for why: apt bandit 1.6.2 version-skew,
-## not a per-repo choice). A per-repo REAL false positive still
-## uses bandit's `# nosec` inline comment. If a real use case for
+## the previous defaults (medium / medium / 10 min). No
+## workflow-side skips: the fleet-wide B303,B324 weak-hash pair
+## is GATED (blocking); non-security digests are waived per-site
+## with bandit's `# nosec` inline comment (see the `bandit` step;
+## the apt bandit 1.6.2 version-skew is why B324's internal-error
+## noise is waived, not a per-repo choice). A per-repo REAL false
+## positive uses the same `# nosec` mechanism. If a real use case for
 ## per-repo skip lists appears during migration, promote
 ## `bandit.skips` to dm-consumer.yml at that point (see spec
 ## parameter table).
