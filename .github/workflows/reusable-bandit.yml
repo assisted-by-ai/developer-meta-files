@@ -150,12 +150,16 @@ jobs:
         ##      raises an internal error on a non-literal hashlib.new()
         ##      arg (logged, exit 0); `# nosec B324` silences that noise.
         ##      WAIVER PLACEMENT: 1.6.2 ignores the `# nosec` test id and
-        ##      skips the WHOLE AST node (every check on it), so put it
-        ##      only on a line whose call is JUST the waived hash -- never
-        ##      one also carrying shell=True / eval / another sink, or
-        ##      that high-severity finding is masked too. High-severity
-        ##      checks (shell=True, eval, ...) fail the gate UNLESS
-        ##      co-located on a waived line; keep waived lines minimal.
+        ##      skips the WHOLE AST node (every check on it). The skip is
+        ##      keyed to the line where the node STARTS, so a `# nosec` on
+        ##      the opening line of a MULTILINE call masks sinks on its
+        ##      continuation lines too. Put it only on a single, self-
+        ##      contained line whose call is JUST the waived hash -- never
+        ##      the opening line of a multiline call, and never a line also
+        ##      carrying shell=True / eval / another sink, or that
+        ##      high-severity finding is masked too. High-severity checks
+        ##      (shell=True, eval, ...) fail the gate UNLESS co-located on
+        ##      a waived line; keep waived lines minimal.
         ## --   end of options (defensive; file list may begin
         ##      with names like './-foo.py' that would otherwise
         ##      be parsed as options).
