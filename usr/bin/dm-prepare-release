@@ -557,7 +557,7 @@ image_sbom_sidecar_sign() {
    [ -f "${binary_image_raw_file}.cdx.json" ] || return 0
    safe-rm --force -- "${file_item}.cdx.json"
    cp -- "${binary_image_raw_file}.cdx.json" "${file_item}.cdx.json"
-   sign_and_verify_all "${file_item}.cdx.json"
+   sign_and_verify_signify "${file_item}.cdx.json"
 }
 
 signatures_create() {
@@ -670,18 +670,18 @@ signatures_create() {
       sha512sum --check -- "${file_item}.sha512sums"
 
       if [ "${should_signify}" = "true" ]; then
-         sign_and_verify_all "${file_item}"
+         sign_and_verify_signify "${file_item}"
       else
-         sign_and_verify_openpgp "${file_item}"
+         sign_and_verify "${file_item}"
       fi
-      sign_and_verify_all "${file_item}.torrent"
-      sign_and_verify_all "${file_item}.sha512sums"
+      sign_and_verify_signify "${file_item}.torrent"
+      sign_and_verify_signify "${file_item}.sha512sums"
 
       local dm_target_item
       dm_target_item="${target_names[i]}"
       if [ -n "${dm_target_item}" ]; then
          "${dist_developer_meta_files_folder}/usr/bin/dm-reproducible-buildinfo" --target "${dm_target_item}" --image "${file_item}"
-         sign_and_verify_all "${file_item}.dm-buildinfo"
+         sign_and_verify_signify "${file_item}.dm-buildinfo"
       fi
 
       image_sbom_sidecar_sign "${file_item}" "${dm_target_item}"
