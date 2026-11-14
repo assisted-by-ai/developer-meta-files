@@ -59,6 +59,9 @@ verify_cmd_signify() {
 sign_and_verify_openpgp() {
    sign_cmd_openpgp "${1}" "${1}.asc" || return
    verify_cmd_openpgp "${1}" "${1}.asc" || return
+   ## OpenPGP-only path: drop any sibling signify '.sig' so a stale one cannot
+   ## read as a current signature.
+   safe-rm -f -- "${1}.sig" || return
 }
 
 sign_and_verify_all() {
