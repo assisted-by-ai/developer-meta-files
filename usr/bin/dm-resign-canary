@@ -48,7 +48,7 @@ sanity_tests() {
 
 sign_and_verify_canary_openpgp() {
    ## Detached signature + verify via the shared signing library.
-   sign_and_verify "${full_path_to_canary_txt}"
+   sign_and_verify_openpgp "${full_path_to_canary_txt}"
 
    ## Clearsigned canary in addition to the detached signature.
    local base_name clearsigned_file
