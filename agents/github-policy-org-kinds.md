@@ -42,13 +42,14 @@ that is not SOURCE".
 
 The axes are orthogonal. Dependabot follows the second, not the first.
 Dependabot ALERTS are not governed by axis 1: they are not "on where the
-code lives" (SOURCE has them off) but centralized on MIRROR by the
-decision below. PVR follows neither axis (off everywhere -- see below).
+code lives" (SOURCE has them off) but centralized on MIRROR by the policy
+below. PVR follows neither axis (off everywhere -- see below).
 
 ## Settings per kind
 
 Applied per-repo on the org side: the org-level Code Security
-Configurations API is PAID PLAN ONLY (tested on Free 2026-05).
+Configurations API is PAID PLAN ONLY, absent on the Free plan these orgs
+run.
 
 | Setting | SOURCE | MIRROR | PROJECT | STAGE | PERSON | BOT |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -83,8 +84,8 @@ API endpoints:
 - secret_scanning + push protection: in the repo PATCH body.
 - rulesets: `POST /repos/{o}/{r}/rulesets`.
 
-On the ORG kinds every `--apply` reconciles the disable side too, so
-leftovers from older un-gated runs or UI flips are cleaned up.
+On the ORG kinds every `--apply` reconciles the disable side too, so any
+out-of-policy enable (a UI flip, a stray setting) is cleaned up.
 
 PERSON and BOT are the exception. `dm-github-personal-policy` enforces
 the repo PATCH body (issues/wiki/projects/discussions all off), the
@@ -175,17 +176,15 @@ intentionally excluded from the writable registered set.
 
 ## Dependabot
 
-**Decision (2026-07-31): ALERTS and SECURITY updates run on
-org-ai-assisted (MIRROR) only** -- centralized so one CVE inbox is not
-split across a repo and its mirror. **VERSION updates follow CI**:
+**ALERTS and SECURITY updates run on org-ai-assisted (MIRROR) only** --
+centralized so one CVE inbox is not split across a repo and its mirror.
+**VERSION updates follow CI**:
 allowed wherever Actions can verify a bump PR (MIRROR, PROJECT,
 opt-in per repo), absent where Actions is off org-wide (SOURCE, STAGE).
 
 Every Dependabot output only becomes finishable work where CI can build
 and test the result. An unverifiable PR stream is worse than none: it
-costs review attention and shows a green merge button backed by
-nothing. (This replaces the earlier "alerts belong on the canonical
-SOURCE repo" reasoning, now overruled.)
+costs review attention and shows a green merge button backed by nothing.
 
 ### The three switches
 
@@ -198,11 +197,10 @@ SOURCE repo" reasoning, now overruled.)
 | Needs config file | no | no | yes |
 | Policy constant | `POLICY_REPO_DEPENDABOT_ALERTS` / `_ALERTS_OFF` | `POLICY_REPO_DEPENDABOT_FIXES` / `_FIXES_OFF` | `POLICY_DEPENDABOT_VERSION_UPDATES_OFF_*` (a skip line, not an API call) |
 
-Measured 2026-07-31 against `GET
-/orgs/{org}/code-security/configurations`: the object carries
+The `GET /orgs/{org}/code-security/configurations` object carries
 `dependabot_alerts` and `dependabot_security_updates` but no
-version-updates field, so the file really is the only switch for the
-third column.
+version-updates field, so the file is the only switch for the third
+column.
 
 **On a FORK the file is necessary but not sufficient.** GitHub does NOT
 auto-enable version updates on a fork when a `dependabot.yml` arrives
@@ -222,7 +220,8 @@ until that one-time per-fork UI enable is done. (Documented: GitHub docs,
 - Enable side (reversed): alerts first, because
   `PUT /automated-security-fixes` requires them.
 - `dm-github-personal-policy` keeps the active-disable step (step 8)
-  commented out: the personal mirrors never had these on.
+  commented out: the personal mirrors are never enabled, so no disable
+  pass is needed.
 
 ### How `dependabot.yml` reaches a repo: opt-in, not blanket
 
@@ -253,8 +252,8 @@ config to live somewhere not ff-synced from SOURCE. The per-fork UI
 enable above cuts the other way and is the saving grace: because a fork
 never auto-enables version updates from a synced file, the shared file
 is INERT on the mirror until someone enables it per-repo in the UI --
-the split is effectively made by that enable, not by file presence.
-Recorded as a maintenance-model question, not decided here. The
+the split is effectively made by that enable, not by file presence. This
+is a maintenance-model question, not a policy-encoding one. The
 alerts/security pair (real per-repo API setters, no config file) is
 unambiguous: on for the mirror, actively deleted elsewhere.
 
@@ -274,7 +273,7 @@ So the SOURCE half is the desired state an owner can act on plus the
 measurement of how far live state is from it -- not a claim they match.
 The MIRROR and PROJECT halves are enforced on every `--apply`.
 
-### Measured SOURCE inventory (2026-07-31)
+### SOURCE inventory (snapshot 2026-07-31)
 
 124 repos (Kicksecure 93, Whonix 31). Exactly 15 carry
 `.github/dependabot.yml`, zero carry a `.yaml` variant:
@@ -330,7 +329,7 @@ Deliberately NOT compared, stated rather than implied:
   indistinguishable from a permissions wall. Only the must-be-ON
   direction is asserted, on MIRROR.
 - Per-repo non-Dependabot settings (repo PATCH body, PVR, rulesets) are
-  applied but not compared. Pre-existing gap.
+  applied but not compared (a known audit gap).
 
 ## UI-only operator flips
 
@@ -359,8 +358,7 @@ flip in the UI. Each is emitted only where its subject exists.
 
 ## Potential future tightenings (not in policy yet)
 
-Surfaced in the 2026-05 web-settings sweep; each is low-risk, gated on
-operator appetite for the friction.
+Each is low-risk, gated on operator appetite for the friction.
 
 - **`web_commit_signoff_required: true`** (org or per-repo): forces a
   `Signed-off-by:` DCO trailer (https://developercertificate.org/) on
