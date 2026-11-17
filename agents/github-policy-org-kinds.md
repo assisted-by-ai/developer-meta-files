@@ -31,17 +31,19 @@ that is not SOURCE".
 
 ## The two axes that drive every diff
 
-1. **Is the code maintained elsewhere?** -> governs issues and alerts.
-   A fork (MIRROR) routes issues/alerts upstream where the canonical
-   repo already reports them. Code maintained in place (SOURCE,
-   PROJECT) keeps issues on.
+1. **Is the code maintained elsewhere?** -> governs `has_issues`. A
+   fork (MIRROR) routes issues upstream where the canonical repo already
+   tracks them. Code maintained in place (SOURCE, PROJECT) keeps issues
+   on.
 2. **Where does the CI that acts on a report run?** -> governs
    Dependabot. SOURCE and STAGE disable Actions org-wide, so a bump PR
    there can never carry a verdict. MIRROR and PROJECT keep Actions on,
    so a bump PR is verifiable.
 
-The axes are orthogonal and Dependabot follows the second, not the
-first. PVR follows neither (off everywhere -- see below).
+The axes are orthogonal. Dependabot follows the second, not the first.
+Dependabot ALERTS are not governed by axis 1: they are not "on where the
+code lives" (SOURCE has them off) but centralized on MIRROR by the
+decision below. PVR follows neither axis (off everywhere -- see below).
 
 ## Settings per kind
 
@@ -58,23 +60,39 @@ Configurations API is PAID PLAN ONLY (tested on Free 2026-05).
 | branch + tag rulesets | on | on | on | on | on | on |
 | ruleset `required_signatures` rule | **on** | off | off | off | **on** | off |
 | ruleset bypass actor | `[OrgAdmin]` | `[OrgAdmin]` | `[OrgAdmin]` | `[OrgAdmin]` | `[User]` | `[]` |
-| CI / GitHub Actions | off (org-wide) | **on** (allow-list) | **on** | off (org-wide) | off | off |
-| `has_issues` | on | off | on | off | - | - |
-| `has_wiki` / `has_discussions` | off | off | off | off | - | - |
+| CI / GitHub Actions | off (org-wide) | **on** (allow-list) | **on** (allow-list) | off (org-wide) | off | off |
+| `has_issues` | on | off | on | off | off | off |
+| `has_wiki` | off | off | off | off | off | off |
+| `has_projects` | on* | off | on* | off | off | off |
+| `has_discussions` | on* | off | off | off | off | off |
 | GitHub Pages | not touched | not touched | not touched | not touched | `DELETE /pages` | `DELETE /pages` |
+
+`*` = not in the PATCH body, so a pre-existing board is left as-is
+(effectively on); the apply never turns one off. SOURCE only PATCHes
+`has_wiki: false` + `has_issues: true`; PROJECT only `has_wiki: false` +
+`has_issues: true` + `has_discussions: false`.
 
 API endpoints:
 - Dependabot alerts: `PUT /repos/{o}/{r}/vulnerability-alerts` on
-  MIRROR, `DELETE` elsewhere.
+  MIRROR; the org tool `DELETE`s on the other ORG kinds it reconciles
+  (SOURCE, PROJECT, STAGE).
 - Dependabot security updates: `PUT /automated-security-fixes` on
-  MIRROR, `DELETE` elsewhere.
+  MIRROR; `DELETE` on the other org kinds.
 - Dependabot version updates: no REST setter at any scope;
   `.github/dependabot.yml` presence IS the switch.
 - secret_scanning + push protection: in the repo PATCH body.
 - rulesets: `POST /repos/{o}/{r}/rulesets`.
 
-Every `--apply` reconciles the disable side too, so leftovers from
-older un-gated runs or UI flips are cleaned up.
+On the ORG kinds every `--apply` reconciles the disable side too, so
+leftovers from older un-gated runs or UI flips are cleaned up.
+
+PERSON and BOT are the exception. `dm-github-personal-policy` enforces
+the repo PATCH body (issues/wiki/projects/discussions all off), the
+rulesets, and `DELETE /pages`, but does NOT actively reconcile Dependabot
+or PVR: the enable step is kept commented out and there is no disable
+pass. The Dependabot and PVR "off" cells for PERSON/BOT are the expected
+state of a never-enabled personal mirror, not a per-run `DELETE` --
+enabling one by hand would not be cleaned up by the next apply.
 
 ### Rulesets
 
@@ -103,9 +121,14 @@ via `POLICY_RULESET_RULES_<ROLE>` and `POLICY_RULESET_BYPASS_<ROLE>` in
 SOURCE and STAGE disable Actions org-wide
 (`enabled_repositories=none`): canonical CI runs on the project's own
 infra, and a STAGE org only serves a Pages legacy-branch build.
-PERSON/BOT disable it (mirrors run no workflows). MIRROR and PROJECT
-keep it on; MIRROR's allow-list is github-owned + verified-creators --
-it is where AI-assisted dev + CI + scanner suites run.
+PERSON/BOT disable it (mirrors run no workflows). MIRROR and PROJECT both
+keep it on, under the SAME allow-list (`allowed_actions: selected`):
+github-owned actions + verified creators + the `org-ai-assisted/
+developer-meta-files` reusable-workflow and action patterns. Those
+patterns are load-bearing -- without them a same-org `uses:` call to a
+developer-meta-files reusable workflow fails at startup with zero jobs
+(how a PROJECT consumer breaks). MIRROR is where AI-assisted dev + CI +
+scanner suites run.
 
 ### STAGE profile
 
@@ -125,8 +148,11 @@ canonical route is the wiki linked from
 and the Vulnerability Disclosure Policy page). An open GitHub
 private-report inbox would be a second one nobody reads -- worse than
 none, since a researcher reasonably assumes it is monitored.
-`apply_repo_policy` unconditionally `DELETE`s PVR on every repo; there
-is no enable constant in `github-policy-data.bsh`. Pinned by
+The org tool's `apply_repo_policy` unconditionally `DELETE`s PVR on
+every ORG repo it manages (SOURCE/MIRROR/PROJECT/STAGE); there is no
+enable constant in `github-policy-data.bsh`. The personal tool does not
+touch the PVR endpoint, so PERSON/BOT "off" is the expected
+never-enabled state, not an enforced `DELETE`. Pinned by
 `test_dm_apply_project.sh`.
 
 ## Registration drift is a finding
@@ -139,7 +165,10 @@ On the default-scope path (no `ORGS_OVERRIDE`),
   (it would otherwise sit unhardened with nothing reporting the gap);
 - a registered org the bot is not admin of as `STALE`.
 
-Either fails `--audit` and warns on `--apply`/`--dry-run`.
+Either is a finding that exits the run non-zero in EVERY mode: it
+increments `audit_findings` (fails `--audit`) and sets `policy_warn_seen`
+(fails `--apply` and `--dry-run` too). The line is logged at `warn`
+level, but the process still exits non-zero -- it is not a soft warning.
 `ORGS_OVERRIDE` skips the check -- a deliberately narrowed scope is not
 an account-wide registration statement. SOURCE is member-only and
 intentionally excluded from the writable registered set.
@@ -352,7 +381,10 @@ operator appetite for the friction.
 
   The `require_code_quality_results` ruleset rule (with a `Severity`
   threshold) belongs on SOURCE only; enforcing it on MIRROR would block
-  the AI's own iteration loop. Per-repo enable is UI-only today
+  the AI's own iteration loop. It presumes Actions is first re-enabled on
+  SOURCE, since Code Quality has no result producer without it -- so this
+  pairs with lifting the org-wide Actions-disable, not with today's
+  state. Per-repo enable is UI-only today
   (`https://github.com/<owner>/<repo>/settings/code-quality`).
 
 `sha_pinning_required: true` is intentionally NOT in this list -- see
