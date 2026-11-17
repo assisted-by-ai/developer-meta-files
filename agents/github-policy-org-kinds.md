@@ -191,7 +191,7 @@ SOURCE repo" reasoning, now overruled.)
 
 | | ALERTS | SECURITY updates | VERSION updates |
 | --- | --- | --- | --- |
-| On | `PUT /vulnerability-alerts` | `PUT /automated-security-fixes` | `.github/dependabot.yml` exists |
+| On | `PUT /vulnerability-alerts` | `PUT /automated-security-fixes` | `.github/dependabot.yml` exists (on a FORK, ALSO a per-fork UI enable -- see below) |
 | Off | `DELETE` same endpoint | `DELETE` same endpoint | delete the file (a commit) |
 | Scope | per repo, setting | per repo, setting | per repo, content |
 | Org-wide setter | none | none | **none at any scope** |
@@ -203,6 +203,16 @@ Measured 2026-07-31 against `GET
 `dependabot_alerts` and `dependabot_security_updates` but no
 version-updates field, so the file really is the only switch for the
 third column.
+
+**On a FORK the file is necessary but not sufficient.** GitHub does NOT
+auto-enable version updates on a fork when a `dependabot.yml` arrives
+(deliberately, so pulling the file from upstream does not silently start
+bumps). The fork owner must ALSO enable it once in the UI (repo Settings
+-> Advanced Security -> Dependabot version updates -> Enable); there is
+no REST setter for this either. Since every MIRROR repo is a fork, a
+present + ff-synced `dependabot.yml` there still produces no bump PRs
+until that one-time per-fork UI enable is done. (Documented: GitHub docs,
+"Enabling version updates on forks".)
 
 **Enable/disable ordering:**
 - Disable side: `DEPENDABOT_FIXES_OFF` before `DEPENDABOT_ALERTS_OFF`.
@@ -239,10 +249,14 @@ MIRROR repos ff-sync from SOURCE, so `.github/dependabot.yml` on the
 mirror IS the SOURCE file -- one object in one history. The
 version-updates column therefore cannot be split along the org-kind
 axis by file presence alone: a mirror-only version bump would need the
-config to live somewhere not ff-synced from SOURCE. Recorded as a
-maintenance-model question, not decided here. The alerts/security pair
-(real per-repo API setters, no config file) is unambiguous: on for the
-mirror, actively deleted elsewhere.
+config to live somewhere not ff-synced from SOURCE. The per-fork UI
+enable above cuts the other way and is the saving grace: because a fork
+never auto-enables version updates from a synced file, the shared file
+is INERT on the mirror until someone enables it per-repo in the UI --
+the split is effectively made by that enable, not by file presence.
+Recorded as a maintenance-model question, not decided here. The
+alerts/security pair (real per-repo API setters, no config file) is
+unambiguous: on for the mirror, actively deleted elsewhere.
 
 ### SOURCE half is DECLARATIVE, not enforced
 
