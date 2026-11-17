@@ -29,6 +29,17 @@ to [github-org-tools.md](github-org-tools.md).
 "Mirror" means specifically "mirrors Kicksecure / Whonix", not "any org
 that is not SOURCE".
 
+**PROJECT is mechanically a MIRROR variant, not a SOURCE one.** It runs
+its own GitHub Actions CI (and mirrors to org-ai-assisted), and the bot
+pushes it unsigned -- so the code routes it through MIRROR's branches:
+MIRROR's Actions allow-list, MIRROR's ruleset (no `required_signatures`),
+MIRROR's bypass actor, version-updates opt-in. It diverges from MIRROR on
+only two points: `has_issues` stays on (first-party, no upstream to file
+against), and Dependabot alerts/security are off (centralized on the real
+MIRROR). Read PROJECT as "MIRROR + issues", not "SOURCE + CI" -- it shares
+with SOURCE only the issues-on choice, for a different reason (no upstream
+vs. is the upstream).
+
 ## The two axes that drive every diff
 
 1. **Is the code maintained elsewhere?** -> governs `has_issues`. A
