@@ -2861,12 +2861,10 @@ pkg_sbom_archive() {
    local control_file archive_dir repo_dir codename native_arch version source_date_epoch
    local stanza_list line package binary_architecture build_arch arch_list
 
+   ## Dry-run is handled by the `dry_run_or_run pkg_sbom_archive` call site, consistent with
+   ## the surrounding genmkfile steps; this body only runs for a live packaging pass.
    control_file='debian/control'
    if [ ! -f "${control_file}" ]; then
-      return 0
-   fi
-   if [ "${batch_meta_dry_run:-false}" = "true" ]; then
-      printf '%s\n' "INFO: pkg_sbom_archive skipped under --dry-run (writes + commits the SBOM archive)."
       return 0
    fi
 
@@ -2985,8 +2983,9 @@ pkg_need_version_bump_and_pkg_build_and_reprepro_add() {
    dry_run_or_run genmkfile reprepro-remove
    dry_run_or_run genmkfile reprepro-add
    ## Archive the resolved per-.deb SBOM while the .debs are still in the reprepro index,
-   ## before deb-cleanup prunes the dist folder.
-   pkg_sbom_archive
+   ## before deb-cleanup prunes the dist folder. Wrapped like the surrounding steps: under
+   ## --dry-run reprepro-add did not populate the repo, so the whole hook is a no-op WOULD.
+   dry_run_or_run pkg_sbom_archive
    dry_run_or_run genmkfile deb-cleanup
 
    return 0

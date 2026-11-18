@@ -40,13 +40,14 @@ sbom_archive_apt_root() {
       "${repo_dir}/dists/${codename}/Release" "${lists_dir}/${codename}_Release"
 
    local packages_file relative
-   while IFS= read -r packages_file; do
+   for packages_file in "${repo_dir}/dists/${codename}"/*/binary-*/Packages; do
+      [ -f "${packages_file}" ] || continue
       ## main/binary-amd64/Packages -> local_main_binary-amd64_Packages (apt's own naming).
       relative="${packages_file#"${repo_dir}/dists/${codename}/"}"
       relative="${relative//\//_}"
       ln --symbolic --force -- \
          "${packages_file}" "${lists_dir}/${codename}_${relative}"
-   done < <(find "${repo_dir}/dists/${codename}" -type f -name Packages)
+   done
 }
 
 ## Deterministic CycloneDX serial for one package identity (UUID5, URL namespace). Pins
@@ -86,14 +87,15 @@ sbom_archive_present() {
    local arch="$5"
 
    local packages_file count total=0
-   while IFS= read -r packages_file; do
+   for packages_file in "${repo_dir}/dists/${codename}"/*/binary-*/Packages; do
+      [ -f "${packages_file}" ] || continue
       count="$(grep-dctrl \
          --exact-match --field=Package "${name}" \
          --and --exact-match --field=Version "${version}" \
          --and --exact-match --field=Architecture "${arch}" \
          --count "${packages_file}")"
       total=$(( total + count ))
-   done < <(find "${repo_dir}/dists/${codename}" -type f -name Packages)
+   done
    [ "${total}" -gt 0 ]
 }
 
