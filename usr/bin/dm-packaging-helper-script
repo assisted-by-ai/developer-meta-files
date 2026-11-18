@@ -2860,6 +2860,11 @@ pkg_need_version_bump_do() {
 pkg_sbom_archive() {
    local archive_dir repo_dir
 
+   ## Non-package repo (no debian/control): nothing to archive. Guard FIRST, before expanding
+   ## derivative_repository_name / HOME below -- under 'set -o nounset' an unset
+   ## derivative_repository_name would otherwise abort the whole shell instead of no-op'ing.
+   [ -f debian/control ] || return 0
+
    archive_dir="${dist_sbom_archive_dir:-${HOME}/sourcesown/dist-sbom}"
    ## Authoritative local-repo path. help-steps/misc-helpers.bsh computes
    ## dist_apt_repository_folder = apt_repo_output_base/aptrepo_local/<repo>; for the 'local'
