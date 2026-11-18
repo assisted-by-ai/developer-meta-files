@@ -2858,15 +2858,7 @@ pkg_need_version_bump_do() {
 ## reprepro-add -- the index then carries the freshly built .debs -- and before
 ## deb-cleanup. Local-only provenance; nothing is pushed.
 pkg_sbom_archive() {
-   local control_file archive_dir repo_dir codename native_arch version source_date_epoch
-   local stanza_list line package binary_architecture build_arch arch_list
-
-   ## Dry-run is handled by the `dry_run_or_run pkg_sbom_archive` call site, consistent with
-   ## the surrounding genmkfile steps; this body only runs for a live packaging pass.
-   control_file='debian/control'
-   if [ ! -f "${control_file}" ]; then
-      return 0
-   fi
+   local archive_dir repo_dir
 
    archive_dir="${dist_sbom_archive_dir:-${HOME}/sourcesown/dist-sbom}"
    ## Authoritative local-repo path. help-steps/misc-helpers.bsh computes
@@ -2875,52 +2867,8 @@ pkg_sbom_archive() {
    ## variables.d/05_load-config.bsh). Prefer the exported value when the full dm env set it,
    ## else reconstruct it with the same default reprepro-add itself used.
    repo_dir="${dist_apt_repository_folder:-${local_apt_repository_base:-/srv/derivative-maker${dist_build_slot:+/${dist_build_slot}}}/aptrepo_local/${derivative_repository_name}}"
-   ## reprepro-add JUST populated this repo; a missing one means the derived path is wrong --
-   ## fail loud rather than silently archive nothing.
-   if [ ! -d "${repo_dir}/dists" ]; then
-      printf '%s\n' "ERROR: pkg_sbom_archive: reprepro repo not found at '${repo_dir}' after reprepro-add." >&2
-      return 1
-   fi
 
-   codename="$(sbom_archive_codename "${repo_dir}")"
-   native_arch="$(dpkg --print-architecture)"
-   version="$(dpkg-parsechangelog --show-field Version)"
-   source_date_epoch="$(dpkg-parsechangelog --show-field Timestamp)"
-   ## The arches this build produced (one .deb each for an arch-dependent package). Falls back
-   ## to the native arch when the cross-build list is not set.
-   arch_list="${make_cross_build_platform_list:-${native_arch}}"
-
-   ## One SBOM per binary .deb that landed in the index. Scope: the binary packages DECLARED
-   ## in debian/control -- not auto-generated debug-symbol (-dbgsym) packages, which are debug
-   ## artifacts, not shipped deliverables. An 'all' package yields one arch-independent .deb; an
-   ## arch-dependent package yields one per built arch, archived only for the arches actually in
-   ## the index (sbom_archive_if_present skips the rest instead of aborting the batch).
-   stanza_list="$(grep-dctrl --show-field=Package,Architecture '' "${control_file}")"
-   package=""
-   binary_architecture=""
-   while IFS= read -r line; do
-      case "${line}" in
-         "Package: "*)
-            package="${line#Package: }"
-            ;;
-         "Architecture: "*)
-            binary_architecture="${line#Architecture: }"
-            if [ "${binary_architecture}" = "all" ]; then
-               sbom_archive_if_present \
-                  "${repo_dir}" "${codename}" "${package}" "${version}" \
-                  all "${native_arch}" "${source_date_epoch}" "${archive_dir}"
-            else
-               for build_arch in ${arch_list}; do
-                  sbom_archive_if_present \
-                     "${repo_dir}" "${codename}" "${package}" "${version}" \
-                     "${build_arch}" "${build_arch}" "${source_date_epoch}" "${archive_dir}"
-               done
-            fi
-            ;;
-      esac
-   done <<< "${stanza_list}"
-
-   sbom_archive_commit "${archive_dir}" "sbom: ${derivative_repository_name} ${version}"
+   sbom_archive_run "${repo_dir}" "${archive_dir}" "${derivative_repository_name}"
 }
 
 pkg_need_version_bump_and_pkg_build_and_reprepro_add() {
