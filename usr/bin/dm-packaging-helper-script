@@ -40,7 +40,8 @@ source "${derivative_maker_source_code_dir}/packages/kicksecure/helper-scripts/u
 source "${derivative_maker_source_code_dir}/packages/kicksecure/genmkfile/usr/share/genmkfile/make-helper-one.bsh"
 ## Local dmf libexec helper (self-anchored: ../libexec from usr/bin, source or installed).
 source "${MYDIR}/../libexec/developer-meta-files/spdx-reuse.bsh"
-source "${MYDIR}/../libexec/developer-meta-files/sbom-archive.bsh"
+## Local dmf usr/bin command, also source-able for pkg_sbom_archive.
+source "${MYDIR}/dm-sbom-archive"
 
 log_level=info
 
@@ -2854,7 +2855,7 @@ pkg_need_version_bump_do() {
 ## NOTE: When calling this directly, redirect STDERR to /dev/null with
 ## 2>/dev/null.
 ## Archive a resolved per-.deb CycloneDX SBOM for every binary package of the current
-## repo, from the local reprepro index (see the sbom-archive.bsh library). Called after
+## repo, from the local reprepro index (see the dm-sbom-archive command). Called after
 ## reprepro-add -- the index then carries the freshly built .debs -- and before
 ## deb-cleanup. Local-only provenance; nothing is pushed.
 pkg_sbom_archive() {

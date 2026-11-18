@@ -24,7 +24,7 @@
 ## Debian trixie (testing/unstable only); add a '--sbom-type spdx' pass here once it is.
 ##
 ## Executable AND source-able: run it as
-##   sbom-archive.bsh <repo_dir> <archive_dir> <repo_name>
+##   dm-sbom-archive <repo_dir> <archive_dir> <repo_name>
 ## from a package source dir, or source it and call the pure functions (unit tests do).
 
 ## provides was_executed
