@@ -55,9 +55,27 @@ sbom_archive_serial() {
    uuidgen --sha1 --namespace @url --name "deb/$1/$2/$3"
 }
 
-## True when the exact (name, version) binary is present in the reprepro index -- i.e. it
-## was actually built for this host and added. A binary package named in debian/control but
-## not produced for the native arch is legitimately absent, so the caller SKIPS it rather
+## The single codename under the repo's dists/ (aptrepo_local carries exactly one). Fails
+## loud if there is not exactly one, so a wrong/empty repo path cannot silently resolve to
+## a literal '*' glob (find would then error on a nonexistent dir).
+sbom_archive_codename() {
+   local repo_dir="$1"
+   local dir count=0 codename=''
+   for dir in "${repo_dir}"/dists/*/; do
+      [ -d "${dir}" ] || continue
+      codename="$(basename -- "${dir}")"
+      count=$(( count + 1 ))
+   done
+   if [ "${count}" -ne 1 ]; then
+      printf '%s\n' "ERROR: sbom_archive_codename: expected one codename under '${repo_dir}/dists', found ${count}." >&2
+      return 1
+   fi
+   printf '%s\n' "${codename}"
+}
+
+## True when the exact (name, version, arch) binary is present in the reprepro index -- i.e.
+## it was actually built for this host and added. A binary package named in debian/control
+## but not produced for a given arch is legitimately absent, so the caller SKIPS it rather
 ## than treating a missing SBOM as an error; a package that IS present but will not resolve
 ## is a real fault that sbom_archive_one fails on.
 sbom_archive_present() {
@@ -65,16 +83,40 @@ sbom_archive_present() {
    local codename="$2"
    local name="$3"
    local version="$4"
+   local arch="$5"
 
    local packages_file count total=0
    while IFS= read -r packages_file; do
       count="$(grep-dctrl \
          --exact-match --field=Package "${name}" \
          --and --exact-match --field=Version "${version}" \
+         --and --exact-match --field=Architecture "${arch}" \
          --count "${packages_file}")"
       total=$(( total + count ))
    done < <(find "${repo_dir}/dists/${codename}" -type f -name Packages)
    [ "${total}" -gt 0 ]
+}
+
+## Archive one binary package's SBOM IF it is in the index for this arch; INFO-skip if not
+## (an arch the package was not built for). So a missing .deb neither aborts the batch nor
+## passes silently.
+sbom_archive_if_present() {
+   local repo_dir="$1"
+   local codename="$2"
+   local name="$3"
+   local version="$4"
+   local pkg_arch="$5"
+   local distro_arch="$6"
+   local source_date_epoch="$7"
+   local archive_dir="$8"
+
+   if ! sbom_archive_present "${repo_dir}" "${codename}" "${name}" "${version}" "${pkg_arch}"; then
+      printf '%s\n' "INFO: sbom_archive: '${name}' ${version} ${pkg_arch} not in the index; skipping."
+      return 0
+   fi
+   sbom_archive_one \
+      "${repo_dir}" "${codename}" "${name}" "${version}" \
+      "${pkg_arch}" "${distro_arch}" "${source_date_epoch}" "${archive_dir}" >/dev/null
 }
 
 ## Generate and write the resolved CDX SBOM for ONE binary package.
@@ -122,8 +164,11 @@ sbom_archive_one() {
    ## that defeats its own purpose. Fail loud instead.
    if ! jq --exit-status '[.components[]? | select((.hashes // []) | length > 0)] | length > 0' \
          "${out}" >/dev/null; then
+      ## Remove the unresolved file so a later run's 'git add --all' cannot commit a
+      ## hash-less record.
+      safe-rm --force -- "${out}"
       printf '%s\n' \
-         "ERROR: sbom_archive_one: '${name} ${version} ${pkg_arch}' did not resolve in the reprepro index (no hashes); SBOM at '${out}' is unresolved." >&2
+         "ERROR: sbom_archive_one: '${name} ${version} ${pkg_arch}' did not resolve in the reprepro index (no hashes); unresolved SBOM discarded." >&2
       return 1
    fi
    printf '%s\n' "${out}"
@@ -136,6 +181,7 @@ sbom_archive_commit() {
    local archive_dir="$1"
    local message="$2"
 
+   mkdir --parents -- "${archive_dir}"
    if [ ! -d "${archive_dir}/.git" ]; then
       git -C "${archive_dir}" init --quiet
    fi
