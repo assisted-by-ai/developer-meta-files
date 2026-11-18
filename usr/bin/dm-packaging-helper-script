@@ -2872,10 +2872,7 @@ pkg_sbom_archive() {
    ## else reconstruct it with the same default reprepro-add itself used.
    repo_dir="${dist_apt_repository_folder:-${local_apt_repository_base:-/srv/derivative-maker${dist_build_slot:+/${dist_build_slot}}}/aptrepo_local/${derivative_repository_name}}"
 
-   ## Run the command (NOT source): its own main() sets the strict-mode it was written under,
-   ## and the subprocess keeps its loop vars / IFS / LC_ALL out of this shell. ${MYDIR}/
-   ## dm-sbom-archive resolves in the source tree and in /usr/bin alike.
-   dry_run_or_run "${MYDIR}/dm-sbom-archive" "${repo_dir}" "${archive_dir}" "${derivative_repository_name}"
+   "${MYDIR}/dm-sbom-archive" "${repo_dir}" "${archive_dir}" "${derivative_repository_name}"
 }
 
 pkg_need_version_bump_and_pkg_build_and_reprepro_add() {
@@ -2938,10 +2935,10 @@ pkg_need_version_bump_and_pkg_build_and_reprepro_add() {
    dry_run_or_run genmkfile reprepro-remove
    dry_run_or_run genmkfile reprepro-add
    ## Archive the resolved per-.deb SBOM while the .debs are still in the reprepro index,
-   ## before deb-cleanup prunes the dist folder. pkg_sbom_archive marshals the build-context
-   ## vars into args and runs the dm-sbom-archive command (dry_run_or_run-wrapped inside: a
-   ## --dry-run build populated no repo, so the archive step is a no-op WOULD).
-   pkg_sbom_archive
+   ## before deb-cleanup prunes the dist folder. Wrapped as one unit: under --dry-run
+   ## reprepro-add populated no repo, so the whole hook is a no-op WOULD -- and the body's
+   ## nounset-sensitive ${derivative_repository_name} expansion never runs.
+   dry_run_or_run pkg_sbom_archive
    dry_run_or_run genmkfile deb-cleanup
 
    return 0
