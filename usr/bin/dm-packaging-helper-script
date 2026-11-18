@@ -40,6 +40,7 @@ source "${derivative_maker_source_code_dir}/packages/kicksecure/helper-scripts/u
 source "${derivative_maker_source_code_dir}/packages/kicksecure/genmkfile/usr/share/genmkfile/make-helper-one.bsh"
 ## Local dmf libexec helper (self-anchored: ../libexec from usr/bin, source or installed).
 source "${MYDIR}/../libexec/developer-meta-files/spdx-reuse.bsh"
+source "${MYDIR}/../libexec/developer-meta-files/sbom-archive.bsh"
 
 log_level=info
 
@@ -2852,6 +2853,73 @@ pkg_need_version_bump_do() {
 ##
 ## NOTE: When calling this directly, redirect STDERR to /dev/null with
 ## 2>/dev/null.
+## Archive a resolved per-.deb CycloneDX SBOM for every binary package of the current
+## repo, from the local reprepro index (see the sbom-archive.bsh library). Called after
+## reprepro-add -- the index then carries the freshly built .debs -- and before
+## deb-cleanup. Local-only provenance; nothing is pushed.
+pkg_sbom_archive() {
+   local control_file archive_dir repo_dir codename native_arch version source_date_epoch
+   local stanza_list line package binary_architecture pkg_arch
+
+   control_file='debian/control'
+   if [ ! -f "${control_file}" ]; then
+      return 0
+   fi
+   if [ "${batch_meta_dry_run:-false}" = "true" ]; then
+      printf '%s\n' "INFO: pkg_sbom_archive skipped under --dry-run (writes + commits the SBOM archive)."
+      return 0
+   fi
+
+   archive_dir="${dist_sbom_archive_dir:-${HOME}/sourcesown/dist-sbom}"
+   repo_dir="${binary_build_folder_dist:-${HOME}/derivative-binary${dist_build_slot:+/${dist_build_slot}}}/aptrepo_local/${derivative_repository_name}"
+   if [ ! -d "${repo_dir}/dists" ]; then
+      printf '%s\n' "INFO: pkg_sbom_archive: no local reprepro repo at '${repo_dir}'; skipping SBOM archive."
+      return 0
+   fi
+
+   ## aptrepo_local carries a single codename.
+   local codename_paths
+   codename_paths=( "${repo_dir}"/dists/*/ )
+   codename="$(basename -- "${codename_paths[0]}")"
+
+   native_arch="$(dpkg --print-architecture)"
+   version="$(dpkg-parsechangelog --show-field Version)"
+   source_date_epoch="$(dpkg-parsechangelog --show-field Timestamp)"
+
+   ## One SBOM per binary package. 'all' resolves under the 'all' arch; an arch-specific
+   ## package resolves under the native build arch (what this host actually produced).
+   stanza_list="$(grep-dctrl --show-field=Package,Architecture '' "${control_file}")"
+   package=""
+   binary_architecture=""
+   while IFS= read -r line; do
+      case "${line}" in
+         "Package: "*)
+            package="${line#Package: }"
+            ;;
+         "Architecture: "*)
+            binary_architecture="${line#Architecture: }"
+            if [ "${binary_architecture}" = "all" ]; then
+               pkg_arch="all"
+            else
+               pkg_arch="${native_arch}"
+            fi
+            ## Skip a binary package that was not built for this host (absent from the index);
+            ## archive the rest. A package that IS present but fails to resolve is a real
+            ## fault and sbom_archive_one aborts on it.
+            if ! sbom_archive_present "${repo_dir}" "${codename}" "${package}" "${version}"; then
+               printf '%s\n' "INFO: pkg_sbom_archive: '${package}' ${version} not in the local index (not built for ${native_arch}?); skipping."
+               continue
+            fi
+            sbom_archive_one \
+               "${repo_dir}" "${codename}" "${package}" "${version}" \
+               "${pkg_arch}" "${native_arch}" "${source_date_epoch}" "${archive_dir}" >/dev/null
+            ;;
+      esac
+   done <<< "${stanza_list}"
+
+   sbom_archive_commit "${archive_dir}" "sbom: ${derivative_repository_name} ${version}"
+}
+
 pkg_need_version_bump_and_pkg_build_and_reprepro_add() {
    repo_skip 'derivative-maker' || return 0
 
@@ -2911,6 +2979,9 @@ pkg_need_version_bump_and_pkg_build_and_reprepro_add() {
    dry_run_or_run genmkfile deb-pkg
    dry_run_or_run genmkfile reprepro-remove
    dry_run_or_run genmkfile reprepro-add
+   ## Archive the resolved per-.deb SBOM while the .debs are still in the reprepro index,
+   ## before deb-cleanup prunes the dist folder.
+   pkg_sbom_archive
    dry_run_or_run genmkfile deb-cleanup
 
    return 0
