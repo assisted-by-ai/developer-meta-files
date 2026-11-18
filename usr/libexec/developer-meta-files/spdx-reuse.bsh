@@ -227,7 +227,8 @@ spdx_reuse_generate_toml() {
          '  "COPYING",' \
          '  "LICENSES/**",' \
          '  "debian/**",' \
-         '  "auto-generated-man-pages/**",'
+         '  "auto-generated-man-pages/**",' \
+         '  "usr/share/sbom/**",'
       for p in "${extra[@]}"; do
          [ -n "${p}" ] || continue
          ## Escape for a TOML basic string so an odd path char cannot break it.
