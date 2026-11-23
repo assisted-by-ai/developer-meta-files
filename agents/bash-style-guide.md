@@ -58,6 +58,26 @@ Why: marks AI involvement; satisfies the project's attribution
 policy.
 
 
+**R-003: A new shell file indents with two spaces.** Write every
+file created from scratch with a 2-space indent step.
+
+NEW FILES ONLY. An existing script keeps its established indentation,
+2- or 3-space alike (R-152) -- never reindent a legacy file, and a
+rename is not a rewrite. The gate enforces this only on a path the
+change ADDS: `dist-ai-style` raises R-003 on a newly-added shell file
+whose dominant space-indent step is not 2, and never on a modified or
+renamed one.
+
+Rare exception: a new file that must match 3-space siblings in an
+upstream-tracked directory may keep 3-space with a file-wide
+`## style-ok: R-003` (or `## style-ok: indent-unit`) waiver.
+
+Why: 2-space is the house default for new work; detection is GCD-based
+and parser-free, so it can only miss (indeterminate -> pass), never
+falsely fail a clean 2-space file. Python is NOT covered here -- its
+indentation is black's job (4 spaces); see the Python files section.
+
+
 ## Shell options
 
 **R-010: Set the strict-mode block at the top of every script.**
@@ -1755,6 +1775,15 @@ scan; a rare multi-LINE brace block is still declined, because a config-format
 parser for that one case is the wrong tool.
 
 ## Python files
+
+Formatting convention: Python is `black`-formatted -- 4-space indent
+(black's non-configurable default), 79-column lines -- with `mypy`
+strict and `pylint`, per each package's `pyproject.toml`. This is the
+Python counterpart to R-003's 2-space bash default: the 2-space rule is
+bash-only. These are enforced by black / the per-package CI, not by the
+`dist-ai-style` gate. An `.editorconfig` that sets `indent_size = 2`
+for `[*]` does NOT apply to `*.py` -- black overrides it; give Python a
+`[*.py] indent_size = 4` block so the editor config is honest.
 
 **R-180: A Python file carries a shebang and is executable.**
 
