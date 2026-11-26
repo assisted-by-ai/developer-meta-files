@@ -6,6 +6,7 @@ Depends: apparmor-profile-dist,
  apt-utils,
  bootclockrandomization,
  ca-certificates,
+ debsbom,
  dialog,
  dist-base-files,
  dummy-dependency-mta,
@@ -15,6 +16,8 @@ Depends: apparmor-profile-dist,
  locales,
  menu,
  nmap,
+ python3-cyclonedx-lib,
+ python3-networkx,
  repository-dist,
  sdwdate,
  security-misc-shared,
@@ -22,6 +25,7 @@ Depends: apparmor-profile-dist,
  sudo,
  timesanitycheck,
  usrmerge,
+ uuid-runtime,
  apparmor-profiles-kicksecure,
  apparmor-utils,
  bash-completion,
@@ -419,9 +423,14 @@ Description: All systems, physical hardware, LXQt GUI packages
  Provides packages for LXQt graphical desktop installations.
 
 Package: dist-vm-cli
-Architecture: all
+Architecture: any
 Pre-Depends: legacy-dist
-Depends: ${misc:Depends}
+Depends: virtualbox-guest-additions-iso [amd64 arm64] | virtualbox-7.2 [amd64] | virtualbox-7.3 [amd64] | virtualbox-7.4 [amd64] | virtualbox-8.0 [amd64] | virtualbox-8.1 [amd64] | virtualbox-8.2 [amd64] | virtualbox-8.3 [amd64] | virtualbox-8.4 [amd64],
+ ${misc:Depends}
+Breaks: virtualbox-guest-x11,
+ virtualbox-guest-utils
+Replaces: virtualbox-guest-x11,
+ virtualbox-guest-utils
 Description: All systems, VMs, command-line packages
  For all hardened systems.
  .
@@ -440,15 +449,10 @@ Description: All systems, VMs, server packages
  Provides packages for server installations.
 
 Package: dist-vm-gui-all
-Architecture: any
+Architecture: all
 Pre-Depends: legacy-dist
-Depends: virtualbox-guest-additions-iso [amd64 arm64] | virtualbox-7.2 [amd64] | virtualbox-7.3 [amd64] | virtualbox-7.4 [amd64] | virtualbox-8.0 [amd64] | virtualbox-8.1 [amd64] | virtualbox-8.2 [amd64] | virtualbox-8.3 [amd64] | virtualbox-8.4 [amd64],
- spice-vdagent,
+Depends: spice-vdagent,
  ${misc:Depends}
-Breaks: virtualbox-guest-x11,
- virtualbox-guest-utils
-Replaces: virtualbox-guest-x11,
- virtualbox-guest-utils
 Description: All systems, VMs, GUI packages
  For all hardened systems.
  .
