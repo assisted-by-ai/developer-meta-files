@@ -80,18 +80,20 @@ jobs:
       ## standalone here; the component is checked out under 'component/'.
       DIST_INSTALLER_CLI_STANDALONE: component/${{ inputs.standalone-path }}
     steps:
-      ## git is needed only for the companion-ref resolution below (actions/checkout
-      ## itself falls back to the REST API in a git-less container). Bare distro
-      ## images vary, so ensure it across apt and dnf before resolving.
-      - name: Ensure git for ref resolution
+      ## git is needed for the companion-ref resolution below and for
+      ## actions/checkout's HTTPS fetch. That fetch verifies github.com's cert, so
+      ## the CA bundle must be present: apt --no-install-recommends skips
+      ## ca-certificates (a git Recommends), which breaks TLS on bare Debian /
+      ## Ubuntu / Kali images ("server certificate verification failed. CAfile:
+      ## none"). Ensure both explicitly across apt and dnf; idempotent where they
+      ## are already installed (Fedora / Mint).
+      - name: Ensure git and CA certificates for ref resolution
         run: |
-          if command -v git >/dev/null 2>&1; then
-            true
-          elif command -v apt-get >/dev/null 2>&1; then
+          if command -v apt-get >/dev/null 2>&1; then
             apt-get update --quiet
-            apt-get install --yes --no-install-recommends git
+            apt-get install --yes --no-install-recommends git ca-certificates
           elif command -v dnf >/dev/null 2>&1; then
-            dnf install --assumeyes git
+            dnf install --assumeyes git ca-certificates
           fi
 
       - name: Checkout component (code under test)
